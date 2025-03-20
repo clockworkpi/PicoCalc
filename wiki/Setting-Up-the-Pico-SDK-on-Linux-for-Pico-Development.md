@@ -49,6 +49,7 @@ Let's create a sample project using the Pico SDK:
 ```bash
 cd ~/pico
 git clone https://github.com/raspberrypi/pico-examples.git
+git checkout tags/sdk-2.0.0 -b sdk2.0.0
 mkdir -p pico-examples/build && cd pico-examples/build
 ```
 
