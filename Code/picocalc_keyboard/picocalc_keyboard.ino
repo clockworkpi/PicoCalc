@@ -140,8 +140,7 @@ void receiveEvent(int howMany) {
     case REG_ID_BAT:{
       //Serial1.print("REG_ID_BAT getBatteryPercent:");Serial1.print(current_bat_pcnt);Serial1.println("%");
       write_buffer[0] = reg;
-      write_buffer[1] = (uint8_t)current_bat_pcnt;
-      
+      write_buffer[1] = reg_get_value(REG_ID_BAT);
     }break;
     case REG_ID_KEY: {
       write_buffer[0] = fifo_count();
@@ -170,16 +169,6 @@ void receiveEvent(int howMany) {
 
 //-this is after receiveEvent-------------------------------
 void requestEvent() { Wire.write(write_buffer,write_buffer_len ); }
-
-void report_bat(){
- if (PMU.isBatteryConnect()) {
-    write_buffer[0] = REG_ID_BAT;
-    write_buffer[1] = PMU.getBatteryPercent();
-
-    write_buffer_len = 2;  
-    requestEvent();
-  }
-}
 
 void printPMU() {
   Serial1.print("isCharging:");
@@ -269,15 +258,12 @@ void check_pmu_int() {
     // set the threshold through getLowBatWarnThreshold( 5% ~ 20% )
     if (PMU.isDropWarningLevel2Irq()) {
       Serial1.println("isDropWarningLevel2");
-      report_bat();
     }
 
     // When the set low-voltage battery percentage shutdown threshold is reached
     // set the threshold through setLowBatShutdownThreshold()  
     //This is related to the battery charging and discharging logic. If you're not sure what you're doing, please don't modify it, as it could damage the battery.
     if (PMU.isDropWarningLevel1Irq()) {
-      report_bat();
-      //
       PMU.shutdown();
     }
     if (PMU.isGaugeWdtTimeoutIrq()) {
