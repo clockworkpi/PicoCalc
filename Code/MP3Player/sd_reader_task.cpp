@@ -19,7 +19,7 @@ void sd_reader_task::start(FatFs * fs, FatFs::FILE * file) {
     _eof       = false;
     _force_eof = false;
     _execute   = false;
-    task::start();
+    task::sign_up();
 }
 
 FatFs::FRESULT sd_reader_task::read_data(uint8_t* buff, uint16_t btr, uint16_t* br) {

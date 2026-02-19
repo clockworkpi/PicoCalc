@@ -28,7 +28,7 @@ private:
     pcm_audio_interface &   _pcm_if;
     sd_reader_task  &       _sd_reader;
     mad_decoder             _decoder{};
-    gpio_rp2040_pin         _led;
+    gpio_rp2040             _led;
     uint8_t                 _mp3_buf[MP3_BUF_SIZE]{};
     uint32_t                _pcm_rate;
     mad_timer_t             _timer;

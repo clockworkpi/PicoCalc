@@ -19,7 +19,7 @@ int main()
     task::sleep_ms(2000);//really neccessary form uart debug
     // Start Main task as privileged task
     main_task Main;
-    Main.start(MAIN_PRIORITY, true);
+    Main.sign_up(core_t::CURRENT_CORE, 50, true);
     // Start the multitasking
     task::start_scheduler();
 }

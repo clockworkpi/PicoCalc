@@ -170,6 +170,7 @@ int16_t mp3_decoder_task::scale(mad_fixed_t sample)
     // Therefore rounding and clipping is normally not
     // necessary!
     // round
+#if 0
     sample += (1L << (MAD_F_FRACBITS - 16));
     // clip
     if (sample >= MAD_F_ONE)
@@ -178,8 +179,9 @@ int16_t mp3_decoder_task::scale(mad_fixed_t sample)
         sample = -MAD_F_ONE;
     // Convert to a standard 16 bit PCM value
     // (signed) in the range of -32768...32767
+#endif
     sample >>= (MAD_F_FRACBITS + 1 - 16);
-    return (int16_t)sample;
+    return sample;
 }
 
 uint16_t mp3_decoder_task::get_position(unsigned long fsize, int max_pos) {

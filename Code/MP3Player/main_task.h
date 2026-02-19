@@ -81,22 +81,22 @@ public:
     void draw_playing();
     void draw_wrap_text(const char *);
 private:
-    gpio_rp2040_pin _cs;    // CS Line of SD card SPI interface
+    gpio_rp2040     _cs;    // CS Line of SD card SPI interface
     spi_rp2040      _spi;   // SPI interface used for the SD card reader
     sd_spi_drv      _sd;    // SD card low level driver
 
-    gpio_rp2040_pin _next;  // Next button
-    gpio_rp2040_pin _part;  // Partition button
-    gpio_rp2040_pin _ps;    // Pico Power save pin
+    gpio_rp2040     _next;  // Next button
+    gpio_rp2040     _part;  // Partition button
+    gpio_rp2040     _ps;    // Pico Power save pin
 
     FatFs           _fs;
     FatFs::DIR      _dir{};
     FatFs::FILEINFO _finfo{};
     FatFs::FILE     _file{};  // MP3 file on SD
 
-    gpio_rp2040_pin _lcd_rst;
-    gpio_rp2040_pin _lcd_dc;
-    gpio_rp2040_pin _lcd_cs;
+    gpio_rp2040     _lcd_rst;
+    gpio_rp2040     _lcd_dc;
+    gpio_rp2040     _lcd_cs;
     spi_rp2040 _lcd_spi;
     ili9488_drv _lcd;
     uGUI       _gui;

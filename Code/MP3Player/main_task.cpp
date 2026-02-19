@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include "main_task.h"
 #include "logo50.h"
 #include "icon_enter.h"
@@ -293,7 +294,7 @@ void main_task::menu_start(sd_reader_task&sd_reader,mp3_decoder_task &decoder,pc
     assert(res == FatFs::FR_OK);
     sd_reader.start(&_fs, &_file);
     decoder.reset();
-    decoder.start();
+    decoder.sign_up();
     update_required = 1;
     playing =1;
     last_play_pos = 0;
@@ -310,7 +311,7 @@ void main_task::menu_start_all(sd_reader_task &sd_reader, mp3_decoder_task &deco
     assert(res == FatFs::FR_OK);
     sd_reader.start(&_fs, &_file);
     decoder.reset();
-    decoder.start();
+    decoder.sign_up();
     update_required = 1;
     playing =1;
     last_play_pos = 0;
@@ -515,7 +516,7 @@ void main_task::run() {
     draw_header("Playlist");
     while (true){
         if(playing){
-            if (sd_reader.isAlive() &&  decoder.isAlive()) {
+            if (sd_reader.isLinkedIn() &&  decoder.isLinkedIn()) {
                 //printf("playing now\n");
 
                 if(update_required) {
