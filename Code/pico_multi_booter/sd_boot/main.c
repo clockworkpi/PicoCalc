@@ -171,6 +171,9 @@ static bool __not_in_flash_func(load_program)(const char *filename)
         fclose(fp);
         return true;
     }
+	// We need to set the pointer back because is_same_existing_program will move the file pointer (fp)
+	// whether we like it or not.
+	fseek(fp, 0, SEEK_SET);
 	
     size_t program_size = 0;
     uint8_t buffer[FLASH_SECTOR_SIZE] = {0};
