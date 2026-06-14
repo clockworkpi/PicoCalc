@@ -43,7 +43,8 @@ const uint LEDPIN = 25;
 #define VTOR_OFFSET M33_VTOR_OFFSET
 #define MAX_RAM 0x20080000
 #endif
-uint8_t status_flag;//0 no sdcard ,1 has sd card
+uint8_t status_flag; //0 no sdcard , 1 has sd card
+
 bool sd_card_inserted(void)
 {
     status_flag = !gpio_get(SD_DET_PIN);
@@ -88,10 +89,12 @@ bool fs_init(void)
 
 static bool __not_in_flash_func(is_same_existing_program)(FILE *fp)
 {
+	// Save the file pointer so that the original isn't affected by fread()
+	FILE *fp_separate = fp;
     uint8_t buffer[FLASH_SECTOR_SIZE] = {0};
     size_t program_size = 0;
     size_t len = 0;
-    while ((len = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+    while ((len = fread(buffer, 1, sizeof(buffer), fp_separate)) > 0)
     {
         uint8_t *flash = (uint8_t *)(XIP_BASE + SD_BOOT_FLASH_OFFSET + program_size);
         if (memcmp(buffer, flash, len) != 0)
@@ -171,9 +174,6 @@ static bool __not_in_flash_func(load_program)(const char *filename)
         fclose(fp);
         return true;
     }
-	// We need to set the pointer back because is_same_existing_program will move the file pointer (fp)
-	// whether we like it or not.
-	fseek(fp, 0, SEEK_SET);
 	
     size_t program_size = 0;
     uint8_t buffer[FLASH_SECTOR_SIZE] = {0};
@@ -260,13 +260,16 @@ int load_firmware_by_path(const char *path)
     // Check if there is an already valid application in flash
     bool has_valid_app = is_valid_application(app_location);
 
-    if(path == NULL) {
+	// When path is null, we only wish to launch, not load, so we need to check the validity as well.
+    if(path == NULL && has_valid_app) {
         load_success = true;
     }else{
         load_success = load_program(path);
+		has_valid_app = is_valid_application(app_location);
     }
 
-    if (load_success || has_valid_app)
+	// Both conditions should be met when launching
+    if (load_success && has_valid_app)
     {
         text_directory_ui_set_status("STAT: Launching app...");
         DEBUG_PRINT("launching app\n");
