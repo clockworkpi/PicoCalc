@@ -265,7 +265,11 @@ int load_firmware_by_path(const char *path)
 	// When path is null, we only wish to launch, not load, so we need to check the validity as well.
     if(path == NULL && has_valid_app) {
         load_success = true;
-    }else{
+    }else if(path == NULL && !has_valid_app) {
+		DEBUG_PRINT("err: given path is NULL but existing program is invalid, rebooting\n");
+		sleep_ms(2000);
+        watchdog_reboot(0, 0, 0);
+	}else{ // Independent of validity, a path indicates that we wish to load it.
         load_success = load_program(path);
 		has_valid_app = is_valid_application(app_location);
     }
