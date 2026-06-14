@@ -43,7 +43,7 @@ const uint LEDPIN = 25;
 #define VTOR_OFFSET M33_VTOR_OFFSET
 #define MAX_RAM 0x20080000
 #endif
-uint8_t status_flag; //0 no sdcard , 1 has sd card
+uint8_t status_flag; // 0 no sdcard , 1 has sd card
 
 bool sd_card_inserted(void)
 {
@@ -87,7 +87,7 @@ bool fs_init(void)
     return true;
 }
 
-static bool __not_in_flash_func(is_same_existing_program)(FILE *fp)
+static bool __not_in_flash_func(is_same_as_existing_program)(FILE *fp)
 {
 	// Save the file pointer so that the original isn't affected by fread()
 	FILE *fp_separate = fp;
@@ -168,7 +168,7 @@ static bool __not_in_flash_func(load_program)(const char *filename)
     }
 
 	// Only check for validity after the guard clauses to make sure the file pointer (fp) is valid
-    if ( is_same_existing_program(fp) && is_valid_application((uint32_t*)(XIP_BASE + SD_BOOT_FLASH_OFFSET)) )
+    if ( is_same_as_existing_program(fp) && is_valid_application((uint32_t*)(XIP_BASE + SD_BOOT_FLASH_OFFSET)) )
     {
         DEBUG_PRINT("Same program already valid in flash, skipping\n");
         fclose(fp);
@@ -224,7 +224,9 @@ void boot_default()
     // Get the pointer to the application flash area
     uint32_t *app_location = (uint32_t *)(XIP_BASE + SD_BOOT_FLASH_OFFSET);
     launch_application_from(app_location);
+	
     // We should never reach here
+	DEBUG_PRINT("err: booting default application, launching program failed\n");
     while (1)
     {
         tight_loop_contents();
