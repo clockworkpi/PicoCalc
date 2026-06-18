@@ -1,0 +1,108 @@
+esphome:
+  name: picocalc
+  friendly_name: PicoCalc
+
+### Board Configuration ###
+## Note: If you're using a different board, you may need to change this section
+rp2040:
+  board: rpipico2w
+  framework:
+    platform_version: https://github.com/maxgerhardt/platform-raspberrypi.git#develop
+    version: dev
+
+####### Pin Configuration ######
+# Pinout for the Raspberry Pi Pico2 W
+spi:
+  clk_pin: GPIO10
+  mosi_pin: GPIO11
+  miso_pin: GPIO12
+  id: spi_bus
+
+# Built-in LCD Display
+display:
+  - id: builtin_display
+    platform: ili9xxx
+    model: ILI9341
+    spi_id: spi_bus
+    cs_pin: GPIO13
+    dc_pin: GPIO14
+    reset_pin: GPIO15
+    color_order: BGR
+    invert_colors: true
+    update_interval: 100ms
+    dimensions:
+      width: 320
+      height: 320
+    transform:
+       swap_xy: false
+       mirror_x: true
+       mirror_y: false
+
+lvgl:
+  widgets:
+    - label:
+        id: light_status_label
+        align: CENTER
+        text: "Garage Lights: Unknown"
+    - label:
+        align: TOP_LEFT
+        text: 'Hello World!'
+    - textarea:
+        id: i2c_textbox
+        text: "I2C Scan Results..."
+        width: 290
+        height: 75
+        x: 10
+        y: -10
+        align: BOTTOM_LEFT
+
+text_sensor:
+  - platform: homeassistant
+    name: "Garage Light"
+    entity_id: light.garage_garage_lights
+    id: indoor_garage_light_switch
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return x == "on";
+            then:
+              - lvgl.label.update:
+                  id: light_status_label
+                  text: "Garage Lights: On"
+            else:
+              - lvgl.label.update:
+                  id: light_status_label
+                  text: "Garage Lights: Off"
+
+# Enable logging
+logger:
+  level: DEBUG
+
+###################### REPLACE BELOWWITH YOUR OWN CONFIG ######################
+#
+# Below is just an example reference of the remaining ESPHome device configuration.
+# The easiest way to get started is to use the ESPHome dashboard and make a new
+# device. You can then copy the configuration from above into there.
+#
+###############################################################################
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "<REDACTED>"
+
+ota:
+  - platform: esphome
+    password: "<your_password>"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot in case wifi connection fails
+  ap:
+    ssid: "Picocalc Fallback Hotspot"
+    password: "<fallback_password>"
+    
