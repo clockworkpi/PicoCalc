@@ -78,13 +78,13 @@ DIP switches are on the back of picocalc mainboard
 
 - Put DIP 1 ON
 - Connect PicoCalc with USB Type-C cable
-- sudo stm32flash -w Bin/PicoCalc_BIOS_v1.2.bin -v -S 0x08000000 /dev/ttyUSB0
+- sudo stm32flash -w Bin/PicoCalc_BIOS_v1.6.bin -v -S 0x08000000 /dev/ttyUSB0
 - Put DIP 1 OFF
 
 assume we got **/dev/ttyUSB0** as port of PicoCalc   
 here is the sample correct writing firmware logs from linux:   
 ```
-$ sudo stm32flash -w PicoCalc_BIOS_v1.2.bin -v -S 0x08000000 /dev/ttyUSB0
+$ sudo stm32flash -w PicoCalc_BIOS_v1.6.bin -v -S 0x08000000 /dev/ttyUSB0
 stm32flash 0.7
 
 http://stm32flash.sourceforge.net/
@@ -115,7 +115,7 @@ we can use the official tool [STM32CubeProgrammer](https://www.st.com/en/develop
 - Connect PicoCalc with USB Type-C cable
 - Open STM32CubeProgrammer with right permissions,on linux maybe need sudo,on windows maybe need the Administrator rights 
 - Press **Connect**
-- Open file ,load PicoCalc_BIOS_v1.2.bin
+- Open file ,load PicoCalc_BIOS_v1.6.bin
 - Press **Download**
 - Press Disconnect
 - Put DIP 1 OFF
@@ -132,12 +132,12 @@ Also if We want extract firmware from keyboard,here is the steps:
 
 - Put DIP 1 ON
 - Connect PicoCalc with USB Type-C cable
-- sudo stm32flash -r PicoCalc_BIOS_v1.2.bin -S 0x08000000:65536 /dev/ttyUSB0
+- sudo stm32flash -r PicoCalc_BIOS_v1.6.bin -S 0x08000000:65536 /dev/ttyUSB0
 - Put DIP 1 OFF
 
 here is sample correct extracting logs from linux :  
 ```
-$ sudo stm32flash -r PicoCalc_BIOS_v1.2.bin -S 0x08000000:65536 /dev/ttyUSB0
+$ sudo stm32flash -r PicoCalc_BIOS_v1.6.bin -S 0x08000000:65536 /dev/ttyUSB0
 stm32flash 0.7
 
 http://stm32flash.sourceforge.net/
@@ -158,7 +158,7 @@ Read address 0x08010000 (100.00%) Done.
 ### Write firmware bin file back to the keyboard
 
 ```
-sudo stm32flash -w PicoCalc_BIOS_v1.2.bin -v -S 0x08000000 /dev/ttyUSB0
+sudo stm32flash -w PicoCalc_BIOS_v1.6.bin -v -S 0x08000000 /dev/ttyUSB0
 ```
 
 sample writing back log: 
@@ -186,7 +186,7 @@ Wrote and verified address 0x08010000 (100.00%) Done.
 
 ### Convert firmware bin to intel hex format
 ```
-srec_cat PicoCalc_BIOS_v1.2.bin  -Binary -offset 0x08000000 -output PicoCalc_BIOS_factory_v1.2.hex -Intel
+srec_cat PicoCalc_BIOS_v1.6.bin  -Binary -offset 0x08000000 -output PicoCalc_BIOS_factory_v1.6.hex -Intel
 ```
 
 
