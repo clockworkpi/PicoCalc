@@ -602,6 +602,7 @@ void setup() {
 //hp headphone
 void check_hp_det(){
   int v = digitalRead(PC12);
+  pinMode(PA14, OUTPUT);
   if(v == HIGH) {
     if( head_phone_status != v ) {
       Serial1.println("HeadPhone detected");
