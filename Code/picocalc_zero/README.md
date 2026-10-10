@@ -5,6 +5,29 @@ Git url: `https://github.com/raspberrypi/linux.git`
 Branch: `rpi-6.1.y`  
 Patch commit hash:`0afb5e98488aed7017b9bf321b575d0177feb7ed`    
 
+## How to compile
+```
+git clone  https://github.com/raspberrypi/linux
+
+cd linux
+
+git reset --hard 0afb5e98488aed7017b9bf321b575d0177feb7ed
+
+wget https://raw.githubusercontent.com/clockworkpi/PicoCalc/refs/heads/master/Code/picocalc_zero/kernel.patch
+
+git apply  kernel.patch
+
+make ARCH=arm KERNEL=kernel7 CROSS_COMPILE=arm-linux-gnueabihf- bcm2709_defconfig
+
+./scripts/config -m CONFIG_KEYBOARD_PICOCALC
+make ARCH=arm KERNEL=kernel7 CROSS_COMPILE=arm-linux-gnueabihf-  olddefconfig
+
+make ARCH=arm KERNEL=kernel7 CROSS_COMPILE=arm-linux-gnueabihf- -j2 zImage modules dtbs
+
+
+```
+
+
 ## /boot/config.txt
 ```
 dtparam=i2c_arm=on
