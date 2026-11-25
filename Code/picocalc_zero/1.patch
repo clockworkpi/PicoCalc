@@ -1,0 +1,2434 @@
+diff --git a/arch/arm/boot/dts/overlays/Makefile b/arch/arm/boot/dts/overlays/Makefile
+index 688e3f786..fb0467379 100644
+--- a/arch/arm/boot/dts/overlays/Makefile
++++ b/arch/arm/boot/dts/overlays/Makefile
+@@ -387,7 +387,10 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
+ 	wifimac.dtbo \
+ 	wittypi.dtbo \
+ 	wm8960-soundcard.dtbo \
+-	ws2812-pio.dtbo
++	ws2812-pio.dtbo \
++	picocalc_kbd.dtbo \
++	mmc-spi1.dtbo \
++	picocalc-ili9488.dtbo
+ 
+ targets += dtbs dtbs_install
+ targets += $(dtbo-y)
+diff --git a/arch/arm/boot/dts/overlays/mmc-spi1-overlay.dts b/arch/arm/boot/dts/overlays/mmc-spi1-overlay.dts
+new file mode 100644
+index 000000000..8afcb8e81
+--- /dev/null
++++ b/arch/arm/boot/dts/overlays/mmc-spi1-overlay.dts
+@@ -0,0 +1,34 @@
++/dts-v1/;
++/plugin/;
++
++/ {
++    compatible = "brcm,bcm2835";
++
++   fragment@0 {
++                target = <&spidev0>;
++                __overlay__ {
++                        status = "disabled";
++                };
++   };
++
++    fragment@1 {
++        target = <&spi1>;
++        __overlay__ {
++            status = "okay";
++
++            #address-cells = <1>;
++            #size-cells = <0>;
++
++            sdslot@0 {
++                compatible = "mmc-spi-slot";
++                reg = <0>;                        // SPI CS0
++                voltage-ranges = <3300 3300>;
++                spi-max-frequency = <8000000>;
++                gpios = <&gpio 6 1>;
++                cd-gpios = <&gpio 6 1>;
++                /* interrupts-extended = <&gpio 6 8>; */
++
++            };
++        };
++    };
++};
+diff --git a/arch/arm/boot/dts/overlays/picocalc-ili9488-overlay.dts b/arch/arm/boot/dts/overlays/picocalc-ili9488-overlay.dts
+new file mode 100644
+index 000000000..f3751d09c
+--- /dev/null
++++ b/arch/arm/boot/dts/overlays/picocalc-ili9488-overlay.dts
+@@ -0,0 +1,28 @@
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	compatible = "brcm,bcm2835";
++
++	fragment@0 {
++		target = <&spi0>;
++
++		__overlay__ {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			status = "okay";
++
++			picocalc_ili9488: display@0 {
++				compatible = "cuu,picocalc-ili9488";
++				reg = <0>;
++				spi-max-frequency = <40000000>;
++				dc-gpios = <&gpio 4 GPIO_ACTIVE_HIGH>;
++				reset-gpios = <&gpio 5 GPIO_ACTIVE_HIGH>;
++				rotation = <0>;
++				status = "okay";
++			};
++		};
++	};
++};
+diff --git a/arch/arm/boot/dts/overlays/picocalc_kbd-overlay.dts b/arch/arm/boot/dts/overlays/picocalc_kbd-overlay.dts
+new file mode 100644
+index 000000000..f85d1ce62
+--- /dev/null
++++ b/arch/arm/boot/dts/overlays/picocalc_kbd-overlay.dts
+@@ -0,0 +1,19 @@
++/dts-v1/;
++/plugin/;
++
++/ {
++    compatible = "brcm,bcm2835";
++
++    fragment@0 {
++        target = <&i2c1>;  // Use hardware I2C-1 (SDA=GPIO2, SCL=GPIO3)
++        __overlay__ {
++            #address-cells = <1>;
++            #size-cells = <0>;
++
++            picocalckbd@1f {
++                compatible = "picocalc_kbd";
++                reg = <0x1f>;
++            };
++        };
++    };
++};
+diff --git a/drivers/gpu/drm/tiny/Kconfig b/drivers/gpu/drm/tiny/Kconfig
+index f0e72d4b6..c8c1b24a6 100644
+--- a/drivers/gpu/drm/tiny/Kconfig
++++ b/drivers/gpu/drm/tiny/Kconfig
+@@ -215,3 +215,18 @@ config TINYDRM_SHARP_MEMORY
+ 	  * 4.40" Sharp Memory LCD (LS044Q7DH01)
+ 
+ 	  If M is selected the module will be called sharp_memory.
++
++
++config TINYDRM_PICOCALC_ILI9488
++	tristate "DRM support for PicoCalc ILI9488 display"
++	depends on DRM && SPI && OF
++	select DRM_KMS_HELPER
++	select DRM_GEM_DMA_HELPER
++	select DRM_MIPI_DBI
++	select BACKLIGHT_CLASS_DEVICE
++	help
++	  DRM driver for the PicoCalc 320x320 ILI9488 SPI display.
++
++          Select Y to build the driver into the kernel, or M to build it
++          as a module.
++
+diff --git a/drivers/gpu/drm/tiny/Makefile b/drivers/gpu/drm/tiny/Makefile
+index 48d30bf61..6579d872c 100644
+--- a/drivers/gpu/drm/tiny/Makefile
++++ b/drivers/gpu/drm/tiny/Makefile
+@@ -15,3 +15,4 @@ obj-$(CONFIG_TINYDRM_ILI9486)		+= ili9486.o
+ obj-$(CONFIG_TINYDRM_MI0283QT)		+= mi0283qt.o
+ obj-$(CONFIG_TINYDRM_REPAPER)		+= repaper.o
+ obj-$(CONFIG_TINYDRM_SHARP_MEMORY)	+= sharp-memory.o
++obj-$(CONFIG_TINYDRM_PICOCALC_ILI9488)  += picocalc_ili9488_drm.o
+diff --git a/drivers/gpu/drm/tiny/picocalc_ili9488_drm.c b/drivers/gpu/drm/tiny/picocalc_ili9488_drm.c
+new file mode 100644
+index 000000000..c06907c98
+--- /dev/null
++++ b/drivers/gpu/drm/tiny/picocalc_ili9488_drm.c
+@@ -0,0 +1,812 @@
++// SPDX-License-Identifier: GPL-2.0+
++
++#include <linux/backlight.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/iosys-map.h>
++#include <linux/module.h>
++#include <linux/property.h>
++#include <linux/random.h>
++#include <linux/spi/spi.h>
++#include <linux/version.h>
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_damage_helper.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_gem_atomic_helper.h>
++#include <drm/drm_gem_dma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_mipi_dbi.h>
++#include <drm/drm_modes.h>
++#include <video/mipi_display.h>
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
++#include <drm/clients/drm_client_setup.h>
++#include <drm/drm_fbdev_dma.h>
++#else
++#include <drm/drm_fb_helper.h>
++#endif
++
++#define PICOCALC_WIDTH 320
++#define PICOCALC_HEIGHT 320
++#define PICOCALC_BYTES_PER_PIXEL 3
++#define PICOCALC_SPAN_MERGE_GAP 3
++#define PICOCALC_WINDOW_OVERHEAD 11
++#define PICOCALC_TX_BUFFER_SIZE 4095
++
++static bool debug;
++module_param(debug, bool, 0644);
++MODULE_PARM_DESC(debug, "Enable verbose PicoCalc ILI9488 diagnostics");
++
++static bool test_pattern;
++module_param(test_pattern, bool, 0644);
++MODULE_PARM_DESC(test_pattern,
++		 "Send kernel-generated RGB666 random noise instead of the DRM framebuffer");
++
++#define picocalc_dbg(dev, fmt, ...)					\
++	do {								\
++		if (debug)						\
++			dev_info(dev, fmt, ##__VA_ARGS__);		\
++	} while (0)
++
++struct picocalc_rect {
++	u16 x1;
++	u16 x2;
++	u16 y1;
++	u16 y2;
++};
++
++struct picocalc_ili9488 {
++	struct mipi_dbi_dev *dbidev;
++	u32 *previous_frame;
++	struct picocalc_rect *rects;
++	struct picocalc_rect *row_spans;
++	unsigned int *active_rects;
++	unsigned int *next_active_rects;
++	unsigned int max_rects;
++	size_t tx_buf_size;
++	bool frame_valid;
++};
++
++static int picocalc_map_framebuffer(struct drm_framebuffer *fb,
++				    struct iosys_map *map,
++				    struct iosys_map *data)
++{
++	int ret;
++
++	ret = drm_gem_fb_begin_cpu_access(fb, DMA_FROM_DEVICE);
++	if (ret)
++		return ret;
++
++	ret = drm_gem_fb_vmap(fb, map, data);
++	if (ret)
++		drm_gem_fb_end_cpu_access(fb, DMA_FROM_DEVICE);
++
++	return ret;
++}
++
++static void picocalc_unmap_framebuffer(struct drm_framebuffer *fb,
++				       struct iosys_map *map)
++{
++	drm_gem_fb_vunmap(fb, map);
++	drm_gem_fb_end_cpu_access(fb, DMA_FROM_DEVICE);
++}
++
++static const struct drm_display_mode picocalc_mode = {
++	DRM_MODE_INIT(60, PICOCALC_WIDTH, PICOCALC_HEIGHT, 64, 64),
++};
++
++static int picocalc_send_window(struct mipi_dbi *dbi,
++				const struct picocalc_rect *rect)
++{
++	int ret;
++
++	ret = mipi_dbi_command(dbi, MIPI_DCS_SET_COLUMN_ADDRESS,
++			       rect->x1 >> 8, rect->x1 & 0xff,
++			       (rect->x2 - 1) >> 8, (rect->x2 - 1) & 0xff);
++	if (ret)
++		return ret;
++
++	return mipi_dbi_command(dbi, MIPI_DCS_SET_PAGE_ADDRESS,
++				rect->y1 >> 8, rect->y1 & 0xff,
++				(rect->y2 - 1) >> 8, (rect->y2 - 1) & 0xff);
++}
++
++static int picocalc_send_pixels(struct mipi_dbi *dbi, const u8 *pixels,
++				size_t len, u8 *cmd)
++{
++	int ret = mipi_dbi_command_buf(dbi, *cmd, (u8 *)pixels, len);
++
++	if (!ret) {
++		picocalc_dbg(&dbi->spi->dev,
++			     "pixel transfer cmd=0x%02x bytes=%zu ok\n",
++			     *cmd, len);
++		*cmd = MIPI_DCS_WRITE_MEMORY_CONTINUE;
++	} else {
++		dev_err(&dbi->spi->dev,
++			"pixel transfer cmd=0x%02x bytes=%zu failed: %d\n",
++			*cmd, len, ret);
++	}
++
++	return ret;
++}
++
++static int picocalc_send_test_pattern(struct picocalc_ili9488 *priv)
++{
++	struct mipi_dbi_dev *dbidev = priv->dbidev;
++	u8 *tx = (u8 *)dbidev->tx_buf;
++	u8 cmd = MIPI_DCS_WRITE_MEMORY_START;
++	size_t remaining = (size_t)PICOCALC_WIDTH * PICOCALC_HEIGHT;
++	unsigned int x;
++	int ret;
++
++	ret = picocalc_send_window(&dbidev->dbi,
++				   &(struct picocalc_rect) {
++					   .x1 = 0,
++					   .x2 = PICOCALC_WIDTH,
++					   .y1 = 0,
++					   .y2 = PICOCALC_HEIGHT,
++				   });
++	if (ret)
++		return ret;
++
++	while (remaining) {
++		size_t pixels = min(remaining, priv->tx_buf_size /
++						 PICOCALC_BYTES_PER_PIXEL);
++
++		for (x = 0; x < pixels; x++) {
++			u32 random = get_random_u32();
++			size_t offset = x * PICOCALC_BYTES_PER_PIXEL;
++
++			tx[offset] = random & 0xfc;
++			tx[offset + 1] = (random >> 8) & 0xfc;
++			tx[offset + 2] = (random >> 16) & 0xfc;
++		}
++
++		ret = picocalc_send_pixels(&dbidev->dbi, tx,
++					   pixels * PICOCALC_BYTES_PER_PIXEL,
++					   &cmd);
++		if (ret)
++			return ret;
++		remaining -= pixels;
++	}
++
++	return 0;
++}
++
++static int picocalc_flush_rect(struct picocalc_ili9488 *priv,
++			      struct iosys_map *src,
++			      struct drm_framebuffer *fb,
++			      const struct picocalc_rect *rect)
++{
++	struct mipi_dbi_dev *dbidev = priv->dbidev;
++	u32 row[PICOCALC_WIDTH];
++	u8 *tx = (u8 *)dbidev->tx_buf;
++	u8 cmd = MIPI_DCS_WRITE_MEMORY_START;
++	size_t pos = 0;
++	unsigned int x, y;
++	int ret;
++
++	ret = picocalc_send_window(&dbidev->dbi, rect);
++	if (ret) {
++		dev_err(dbidev->drm.dev,
++			"failed to set window x=%u..%u y=%u..%u: %d\n",
++			rect->x1, rect->x2, rect->y1, rect->y2, ret);
++		return ret;
++	}
++	picocalc_dbg(dbidev->drm.dev,
++		     "flush rect x=%u..%u y=%u..%u\n",
++		     rect->x1, rect->x2, rect->y1, rect->y2);
++
++	for (y = rect->y1; y < rect->y2; y++) {
++		size_t offset = (size_t)y * fb->pitches[0] +
++				(size_t)rect->x1 * sizeof(u32);
++
++		iosys_map_memcpy_from(row, src, offset,
++				      (rect->x2 - rect->x1) * sizeof(u32));
++
++		for (x = rect->x1; x < rect->x2; x++) {
++			u32 pixel = row[x - rect->x1];
++			size_t index = (size_t)y * PICOCALC_WIDTH + x;
++
++			tx[pos++] = (pixel >> 16) & 0xfc;
++			tx[pos++] = (pixel >> 8) & 0xfc;
++			tx[pos++] = pixel & 0xfc;
++			priv->previous_frame[index] = pixel & 0x00ffffff;
++
++			if (pos == priv->tx_buf_size) {
++				ret = picocalc_send_pixels(&dbidev->dbi, tx,
++							   pos, &cmd);
++				if (ret)
++					return ret;
++				pos = 0;
++			}
++		}
++	}
++
++	if (!pos)
++		return 0;
++
++	return picocalc_send_pixels(&dbidev->dbi, tx, pos, &cmd);
++}
++
++static int picocalc_build_rects(struct picocalc_ili9488 *priv,
++				struct iosys_map *src,
++				struct drm_framebuffer *fb,
++				const struct drm_rect *clip,
++				unsigned int *rect_count)
++{
++	u32 row[PICOCALC_WIDTH];
++	unsigned int active_count = 0;
++	unsigned int y;
++
++	*rect_count = 0;
++
++	for (y = clip->y1; y < clip->y2; y++) {
++		unsigned int span_count = 0;
++		unsigned int active_pos = 0;
++		unsigned int next_active_count = 0;
++		unsigned int x;
++		int start = -1;
++		int last_changed = -1;
++		size_t offset = (size_t)y * fb->pitches[0] +
++				(size_t)clip->x1 * sizeof(u32);
++
++		iosys_map_memcpy_from(row, src, offset,
++				      (clip->x2 - clip->x1) * sizeof(u32));
++
++		for (x = clip->x1; x < clip->x2; x++) {
++			size_t index = (size_t)y * PICOCALC_WIDTH + x;
++			bool changed = !priv->frame_valid ||
++				       ((row[x - clip->x1] & 0x00ffffff) !=
++					priv->previous_frame[index]);
++
++			if (changed) {
++				if (start < 0)
++					start = x;
++				last_changed = x;
++			} else if (start >= 0 &&
++				   x - last_changed > PICOCALC_SPAN_MERGE_GAP) {
++				priv->row_spans[span_count++] =
++					(struct picocalc_rect) {
++						.x1 = start,
++						.x2 = last_changed + 1,
++					};
++				start = -1;
++			}
++		}
++
++		if (start >= 0)
++			priv->row_spans[span_count++] =
++				(struct picocalc_rect) {
++					.x1 = start,
++					.x2 = last_changed + 1,
++				};
++
++		for (x = 0; x < span_count; x++) {
++			struct picocalc_rect *span = &priv->row_spans[x];
++			unsigned int rect_index;
++
++			while (active_pos < active_count &&
++			       priv->rects[priv->active_rects[active_pos]].x1 <
++				       span->x1)
++				active_pos++;
++
++			if (active_pos < active_count) {
++				rect_index = priv->active_rects[active_pos];
++				if (priv->rects[rect_index].x1 == span->x1) {
++					active_pos++;
++					if (priv->rects[rect_index].x2 == span->x2) {
++						priv->rects[rect_index].y2 = y + 1;
++						priv->next_active_rects[next_active_count++] =
++							rect_index;
++						continue;
++					}
++				}
++			}
++
++			if (*rect_count >= priv->max_rects)
++				return -EOVERFLOW;
++
++			rect_index = (*rect_count)++;
++			priv->rects[rect_index] = (struct picocalc_rect) {
++				.x1 = span->x1,
++				.x2 = span->x2,
++				.y1 = y,
++				.y2 = y + 1,
++			};
++			priv->next_active_rects[next_active_count++] = rect_index;
++		}
++
++		swap(priv->active_rects, priv->next_active_rects);
++		active_count = next_active_count;
++	}
++
++	return 0;
++}
++
++static int picocalc_flush_damage(struct picocalc_ili9488 *priv,
++				 struct iosys_map *src,
++				 struct drm_framebuffer *fb,
++				 struct drm_rect *clip)
++{
++	struct picocalc_rect full = {
++		.x1 = clip->x1,
++		.x2 = clip->x2,
++		.y1 = clip->y1,
++		.y2 = clip->y2,
++	};
++	u64 update_cost = 0;
++	u64 full_cost;
++	unsigned int rect_count, i;
++	int ret;
++
++	if (!priv->frame_valid) {
++		priv->rects[0] = full;
++		rect_count = 1;
++	} else {
++		ret = picocalc_build_rects(priv, src, fb, clip, &rect_count);
++		if (ret)
++			return ret;
++		if (!rect_count)
++			return 0;
++	}
++
++	for (i = 0; i < rect_count; i++) {
++		const struct picocalc_rect *rect = &priv->rects[i];
++		u64 pixels = (u64)(rect->x2 - rect->x1) *
++			     (rect->y2 - rect->y1);
++
++		update_cost += pixels * PICOCALC_BYTES_PER_PIXEL +
++			       PICOCALC_WINDOW_OVERHEAD;
++	}
++
++	full_cost = (u64)(clip->x2 - clip->x1) *
++		    (clip->y2 - clip->y1) * PICOCALC_BYTES_PER_PIXEL +
++		    PICOCALC_WINDOW_OVERHEAD;
++	if (update_cost >= full_cost) {
++		priv->rects[0] = full;
++		rect_count = 1;
++	}
++
++	for (i = 0; i < rect_count; i++) {
++		ret = picocalc_flush_rect(priv, src, fb, &priv->rects[i]);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static void picocalc_enable(struct drm_simple_display_pipe *pipe,
++			    struct drm_crtc_state *crtc_state,
++			    struct drm_plane_state *plane_state)
++{
++	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
++	struct picocalc_ili9488 *priv = dbidev->driver_private;
++	struct drm_framebuffer *fb = plane_state->fb;
++	struct iosys_map map[1] = { };
++	struct iosys_map data[1] = { };
++	struct drm_rect full = {
++		.x1 = 0,
++		.x2 = fb->width,
++		.y1 = 0,
++		.y2 = fb->height,
++	};
++	struct mipi_dbi *dbi = &dbidev->dbi;
++	int ret, idx;
++
++	picocalc_dbg(dbidev->drm.dev,
++		     "pipe enable requested; fb=%ux%u format=%p4cc pitch=%u rotation=%u\n",
++		     fb->width, fb->height, &fb->format->format,
++		     fb->pitches[0], dbidev->rotation);
++
++	if (!drm_dev_enter(pipe->crtc.dev, &idx)) {
++		dev_err(dbidev->drm.dev,
++			"pipe enable aborted: DRM device is unplugged\n");
++		return;
++	}
++
++	priv->frame_valid = false;
++	ret = mipi_dbi_poweron_conditional_reset(dbidev);
++	picocalc_dbg(dbidev->drm.dev,
++		     "conditional power-on reset returned %d\n", ret);
++	if (ret < 0) {
++		dev_err(dbidev->drm.dev,
++			"panel power-on/reset failed: %d\n", ret);
++		goto out;
++	}
++
++	ret = mipi_dbi_command(dbi, 0xe0,
++				       0x00, 0x03, 0x09, 0x08, 0x16,
++				       0x0a, 0x3f, 0x78, 0x4c, 0x09,
++				       0x0a, 0x08, 0x16, 0x1a, 0x0f);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xe1,
++				       0x00, 0x16, 0x19, 0x03, 0x0f,
++				       0x05, 0x32, 0x45, 0x46, 0x04,
++				       0x0e, 0x0d, 0x35, 0x37, 0x0f);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xc0, 0x17, 0x15);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xc1, 0x41);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xc5, 0x00, 0x12, 0x80);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x36, 0x48);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x3a, 0x66);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xb0, 0x80);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xb1, 0xa0);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xb4, 0x02);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x21);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xb6, 0x02, 0x02, 0x3b);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xb7, 0xc6);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0xf7, 0xa9, 0x51, 0x2c, 0x82);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x11);
++	if (ret)
++		goto out;
++	msleep(120);
++	ret = mipi_dbi_command(dbi, 0x33,
++				       0x00, 0x00, 0x01, 0x40, 0x00, 0xa0);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x29);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x36);
++	if (ret)
++		goto out;
++	ret = mipi_dbi_command(dbi, 0x36, 0x48);
++	if (ret)
++		goto out;
++	picocalc_dbg(dbidev->drm.dev,
++		     "ILI9488 initialization sequence completed\n");
++
++	if (test_pattern) {
++		ret = picocalc_send_test_pattern(priv);
++		if (ret) {
++			dev_err(dbidev->drm.dev,
++				"kernel-generated color-bar transfer failed: %d\n",
++				ret);
++			goto out;
++		}
++		priv->frame_valid = true;
++		picocalc_dbg(dbidev->drm.dev,
++			     "kernel-generated RGB666 random noise sent; DRM framebuffer bypassed\n");
++		goto out;
++	}
++
++	priv->frame_valid = false;
++	ret = picocalc_map_framebuffer(fb, map, data);
++	if (ret) {
++		dev_err(dbidev->drm.dev,
++			"initial framebuffer map failed: %d\n", ret);
++		goto out;
++	}
++
++	ret = picocalc_flush_damage(priv, &data[0], fb, &full);
++	picocalc_unmap_framebuffer(fb, map);
++	if (ret) {
++		dev_err_ratelimited(dbidev->drm.dev,
++				    "initial framebuffer transfer failed: %d\n",
++				    ret);
++		goto out;
++	}
++	priv->frame_valid = true;
++	picocalc_dbg(dbidev->drm.dev,
++		     "initial full-frame transfer completed successfully\n");
++
++	if (dbidev->backlight) {
++		ret = backlight_enable(dbidev->backlight);
++		if (ret)
++			dev_err(dbidev->drm.dev,
++				"failed to enable backlight: %d\n", ret);
++	}
++out:
++	drm_dev_exit(idx);
++}
++
++static void picocalc_update(struct drm_simple_display_pipe *pipe,
++			    struct drm_plane_state *old_state)
++{
++	struct drm_plane_state *state = pipe->plane.state;
++	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
++	struct picocalc_ili9488 *priv = dbidev->driver_private;
++	struct drm_framebuffer *fb = state->fb;
++	struct drm_rect clip;
++	struct iosys_map map[1] = { };
++	struct iosys_map data[1] = { };
++	int ret, idx;
++
++	picocalc_dbg(dbidev->drm.dev,
++		     "pipe update requested; active=%u fb=%p frame_valid=%u\n",
++		     pipe->crtc.state->active, fb, priv->frame_valid);
++	if (test_pattern) {
++		picocalc_dbg(dbidev->drm.dev,
++			     "kernel test pattern active; skipping DRM framebuffer update\n");
++		return;
++	}
++	if (!pipe->crtc.state->active || !fb)
++		return;
++
++	if (!drm_dev_enter(fb->dev, &idx))
++		return;
++
++	if (priv->frame_valid) {
++		if (!drm_atomic_helper_damage_merged(old_state, state, &clip)) {
++			picocalc_dbg(dbidev->drm.dev,
++				     "pipe update has no damage; skipping transfer\n");
++			goto out;
++		}
++	} else {
++		clip = (struct drm_rect) {
++			.x1 = 0,
++			.x2 = fb->width,
++			.y1 = 0,
++			.y2 = fb->height,
++		};
++	}
++	picocalc_dbg(dbidev->drm.dev,
++		     "update clip x=%d..%d y=%d..%d\n",
++		     clip.x1, clip.x2, clip.y1, clip.y2);
++
++	ret = picocalc_map_framebuffer(fb, map, data);
++	if (ret) {
++		priv->frame_valid = false;
++		dev_err_ratelimited(dbidev->drm.dev,
++				    "framebuffer mapping failed: %d\n", ret);
++		goto out;
++	}
++
++	ret = picocalc_flush_damage(priv, &data[0], fb, &clip);
++	picocalc_unmap_framebuffer(fb, map);
++	if (ret) {
++		priv->frame_valid = false;
++		dev_err(dbidev->drm.dev,
++			"framebuffer transfer failed: %d\n", ret);
++	} else {
++		priv->frame_valid = true;
++		picocalc_dbg(dbidev->drm.dev,
++			     "pipe update completed successfully\n");
++	}
++out:
++	drm_dev_exit(idx);
++}
++
++static void picocalc_disable(struct drm_simple_display_pipe *pipe)
++{
++	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
++
++	picocalc_dbg(dbidev->drm.dev,
++		     "pipe disabled; panel GRAM retained; backlight device=%s\n",
++		     dbidev->backlight ? "present" : "absent");
++	if (dbidev->backlight) {
++		int ret = backlight_disable(dbidev->backlight);
++
++		if (ret)
++			dev_err_ratelimited(dbidev->drm.dev,
++					    "failed to disable backlight: %d\n",
++					    ret);
++	}
++}
++
++static const struct drm_simple_display_pipe_funcs picocalc_pipe_funcs = {
++	.mode_valid = mipi_dbi_pipe_mode_valid,
++	.enable = picocalc_enable,
++	.disable = picocalc_disable,
++	.update = picocalc_update,
++};
++
++DEFINE_DRM_GEM_DMA_FOPS(picocalc_fops);
++
++static const struct drm_driver picocalc_drm_driver = {
++	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
++	.fops = &picocalc_fops,
++	DRM_GEM_DMA_DRIVER_OPS_VMAP,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
++	DRM_FBDEV_DMA_DRIVER_OPS,
++#endif
++	.debugfs_init = mipi_dbi_debugfs_init,
++	.name = "picocalc-ili9488",
++	.desc = "PicoCalc ILI9488 SPI display",
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 14, 0)
++	.date = "20261027",
++#endif
++	.major = 1,
++	.minor = 0,
++};
++
++static const u32 picocalc_formats[] = {
++	DRM_FORMAT_XRGB8888,
++};
++
++static const struct of_device_id picocalc_of_match[] = {
++	{ .compatible = "cuu,picocalc-ili9488" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, picocalc_of_match);
++
++static const struct spi_device_id picocalc_spi_ids[] = {
++	{ "picocalc-ili9488" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, picocalc_spi_ids);
++
++static void picocalc_free_buffer(void *data)
++{
++	kvfree(data);
++}
++
++static int picocalc_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct mipi_dbi_dev *dbidev;
++	struct picocalc_ili9488 *priv;
++	struct drm_device *drm;
++	struct gpio_desc *dc;
++	u32 rotation = 0;
++	size_t pixels = PICOCALC_WIDTH * PICOCALC_HEIGHT;
++	size_t tx_size;
++	size_t max_transfer;
++	int ret;
++
++	dbidev = devm_drm_dev_alloc(dev, &picocalc_drm_driver,
++				    struct mipi_dbi_dev, drm);
++	if (IS_ERR(dbidev))
++		return PTR_ERR(dbidev);
++
++	drm = &dbidev->drm;
++	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++	priv->dbidev = dbidev;
++	priv->max_rects = DIV_ROUND_UP(PICOCALC_WIDTH, 2) *
++			  PICOCALC_HEIGHT + 1;
++	dbidev->driver_private = priv;
++	drm->mode_config.preferred_depth = 24;
++
++	priv->previous_frame = kvcalloc(pixels, sizeof(*priv->previous_frame),
++					GFP_KERNEL);
++	if (!priv->previous_frame)
++		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, picocalc_free_buffer,
++				       priv->previous_frame);
++	if (ret)
++		return ret;
++
++	priv->rects = kvcalloc(priv->max_rects, sizeof(*priv->rects),
++			       GFP_KERNEL);
++	if (!priv->rects)
++		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, picocalc_free_buffer, priv->rects);
++	if (ret)
++		return ret;
++
++	priv->row_spans = devm_kcalloc(dev, PICOCALC_WIDTH,
++				       sizeof(*priv->row_spans), GFP_KERNEL);
++	priv->active_rects = devm_kcalloc(dev, PICOCALC_WIDTH,
++					  sizeof(*priv->active_rects),
++					  GFP_KERNEL);
++	priv->next_active_rects = devm_kcalloc(dev, PICOCALC_WIDTH,
++					       sizeof(*priv->next_active_rects),
++					       GFP_KERNEL);
++	if (!priv->row_spans || !priv->active_rects ||
++	    !priv->next_active_rects)
++		return -ENOMEM;
++
++	dbidev->dbi.reset = devm_gpiod_get_optional(dev, "reset",
++						    GPIOD_OUT_HIGH);
++	if (IS_ERR(dbidev->dbi.reset))
++		return dev_err_probe(dev, PTR_ERR(dbidev->dbi.reset),
++				     "failed to get reset GPIO\n");
++
++	dc = devm_gpiod_get(dev, "dc", GPIOD_OUT_LOW);
++	if (IS_ERR(dc))
++		return dev_err_probe(dev, PTR_ERR(dc),
++				     "failed to get D/C GPIO\n");
++
++	dbidev->backlight = devm_of_find_backlight(dev);
++	if (IS_ERR(dbidev->backlight))
++		return dev_err_probe(dev, PTR_ERR(dbidev->backlight),
++				     "failed to get backlight\n");
++
++	device_property_read_u32(dev, "rotation", &rotation);
++
++	ret = mipi_dbi_spi_init(spi, &dbidev->dbi, dc);
++	if (ret)
++		return ret;
++
++	/* ILI9488 RGB666 pixels are transmitted as three 8-bit components. */
++	dbidev->dbi.swap_bytes = true;
++
++	max_transfer = min(spi_max_transfer_size(spi),
++			   spi_max_message_size(spi));
++	tx_size = min_t(size_t, max_transfer, PICOCALC_TX_BUFFER_SIZE);
++	tx_size -= tx_size % PICOCALC_BYTES_PER_PIXEL;
++	if (tx_size < PICOCALC_BYTES_PER_PIXEL)
++		return dev_err_probe(dev, -EMSGSIZE,
++				     "SPI controller transfer limit is too small\n");
++	priv->tx_buf_size = tx_size;
++	picocalc_dbg(dev,
++		     "probe: SPI device=%s speed=%uHz mode=0x%x dc_gpio=present reset_gpio=%s tx_buf=%zu\n",
++		     dev_name(dev),
++		     spi->max_speed_hz, spi->mode,
++		     dbidev->dbi.reset ? "present" : "absent", tx_size);
++
++	ret = mipi_dbi_dev_init_with_formats(dbidev, &picocalc_pipe_funcs,
++					     picocalc_formats,
++					     ARRAY_SIZE(picocalc_formats),
++					     &picocalc_mode, rotation, tx_size);
++	if (ret)
++		return ret;
++
++	drm_mode_config_reset(drm);
++	ret = drm_dev_register(drm, 0);
++	if (ret)
++		return ret;
++
++	spi_set_drvdata(spi, drm);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
++	drm_client_setup_with_fourcc(drm, DRM_FORMAT_XRGB8888);
++#else
++	drm_fbdev_generic_setup(drm, 32);
++#endif
++	picocalc_dbg(dev, "DRM device registered successfully\n");
++
++	return 0;
++}
++
++static void picocalc_remove(struct spi_device *spi)
++{
++	struct drm_device *drm = spi_get_drvdata(spi);
++
++	drm_dev_unplug(drm);
++	drm_atomic_helper_shutdown(drm);
++}
++
++static void picocalc_shutdown(struct spi_device *spi)
++{
++	drm_atomic_helper_shutdown(spi_get_drvdata(spi));
++}
++
++static struct spi_driver picocalc_spi_driver = {
++	.driver = {
++		.name = "picocalc-ili9488",
++		.of_match_table = picocalc_of_match,
++	},
++	.id_table = picocalc_spi_ids,
++	.probe = picocalc_probe,
++	.remove = picocalc_remove,
++	.shutdown = picocalc_shutdown,
++};
++module_spi_driver(picocalc_spi_driver);
++
++MODULE_DESCRIPTION("DRM/KMS driver for the PicoCalc ILI9488 SPI display");
++MODULE_AUTHOR("OpenAI");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+index 2ff4fef32..013baaced 100644
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -792,4 +792,13 @@ config KEYBOARD_CYPRESS_SF
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called cypress-sf.
+ 
++config KEYBOARD_PICOCALC
++	tristate "PicoCalc I2C keyboard support"
++	depends on I2C
++	help
++	  Say Y here if you want to enable support for PicoCalc I2C keyboard
++       
++          To compile this driver as a module, choose M here: the
++          module will be called picocalc_kbd.
++
+ endif
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+index 2d906e14f..28c19d59b 100644
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -70,3 +70,4 @@ obj-$(CONFIG_KEYBOARD_TEGRA)		+= tegra-kbc.o
+ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
+ obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
+ obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
++obj-$(CONFIG_KEYBOARD_PICOCALC)         += picocalc_kbd.o
+diff --git a/drivers/input/keyboard/debug_levels.h b/drivers/input/keyboard/debug_levels.h
+new file mode 100644
+index 000000000..9407e82f2
+--- /dev/null
++++ b/drivers/input/keyboard/debug_levels.h
+@@ -0,0 +1,44 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Keyboard Driver for Blackberry Keyboards BBQ10 from arturo182. Software written by wallComputer.
++ * debug_levels.h: Describes the debug levels that can be set for viewing code flow in dmesg.
++ * Use dmesg -wH | grep beepy-kbd for easy viewing.
++ */
++
++#ifndef DEBUG_LEVELS_H_
++#define DEBUG_LEVELS_H_
++
++/*
++ *  Set Debug Level with DEBUG_LEVEL.
++ *   Types of Debug Messages:
++ *       1. Functional Entries. printk() & dev_info() used to show Entries in init & exit, probe, irq, logic.
++ *       2. Read/Write Values. dev_info() used to show Values read and written from i2c functions.
++ *       3. Logical Debugs. dev_info() used for showing Logic flow.
++ *   For All Informations ->  DEBUG_LEVEL set as (DEBUG_LEVEL_FE | DEBUG_LEVEL_RW | DEBUG_LEVEL_LD)
++ *   For Only Read/Write in I2C Client ->  DEBUG_LEVEL set as (DEBUG_LEVEL_RW)
++ *   For Informations on function entires->  DEBUG_LEVEL set as (DEBUG_LEVEL_FE)
++ *   For No Debug ->  DEBUG_LEVEL set as (DEBUG_LEVEL_OFF)
++ */
++
++#define DEBUG_LEVEL_OFF             0
++#define DEBUG_LEVEL_FE              1
++#define DEBUG_LEVEL_RW              2
++#define DEBUG_LEVEL_LD              4
++
++#define DEBUG_LEVEL                 DEBUG_LEVEL_OFF
++// #define DEBUG_LEVEL					DEBUG_LEVEL_FE
++// #define DEBUG_LEVEL                (DEBUG_LEVEL_LD)
++// #define DEBUG_LEVEL			(DEBUG_LEVEL_FE | DEBUG_LEVEL_RW | DEBUG_LEVEL_LD)
++#endif
++
++#if (DEBUG_LEVEL & DEBUG_LEVEL_FE)
++#define dev_info_fe(...) dev_info(__VA_ARGS__)
++#else
++#define dev_info_fe(...)
++#endif
++
++#if (DEBUG_LEVEL & DEBUG_LEVEL_LD)
++#define dev_info_ld(...) dev_info(__VA_ARGS__)
++#else
++#define dev_info_ld(...)
++#endif
+diff --git a/drivers/input/keyboard/picocalc_kbd.c b/drivers/input/keyboard/picocalc_kbd.c
+new file mode 100644
+index 000000000..6fb65c327
+--- /dev/null
++++ b/drivers/input/keyboard/picocalc_kbd.c
+@@ -0,0 +1,1104 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Keyboard Driver for picocalc
++ */
++
++#include <linux/version.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/i2c.h>
++#include <linux/power_supply.h>
++#include <linux/notifier.h>
++#include <linux/reboot.h>
++#include <linux/backlight.h>
++
++#include "picocalc_kbd_code.h"
++
++//#include "config.h"
++#include "debug_levels.h"
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
++#define del_timer          timer_delete
++#define del_timer_sync     timer_delete_sync
++#endif
++
++
++#define REG_ID_BAT (0x0b)
++#define REG_ID_BKL (0x05)
++#define REG_ID_FIF (0x09)
++#define REG_ID_BK2 (0x0A)
++#define REG_ID_OFF (0x0E)
++#define REG_ID_RST (0x08)
++
++#define PICOCALC_WRITE_MASK (1<<7)
++
++#define KBD_BUS_TYPE		BUS_I2C
++#define KBD_VENDOR_ID		0x0001
++#define KBD_PRODUCT_ID		0x0001
++#define KBD_VERSION_ID		0x0001
++/*
++#include "input_iface.h"
++#include "params_iface.h"
++#include "sysfs_iface.h"
++*/
++
++#define KBD_FIFO_SIZE				31
++
++static uint32_t sysfs_gid_setting = 0; // GID of files in /sys/firmware/picocalc
++
++static uint64_t mouse_fast_move_thr_time = 150000000ull;
++static int8_t mouse_move_step = 1;
++
++// From keyboard firmware source
++enum pico_key_state
++{
++	KEY_STATE_IDLE = 0,
++	KEY_STATE_PRESSED = 1,
++	KEY_STATE_HOLD = 2,
++	KEY_STATE_RELEASED = 3,
++	KEY_STATE_LONG_HOLD = 4,
++};
++struct key_fifo_item
++{
++	uint8_t _ : 4;
++	enum pico_key_state state : 4;
++	uint8_t scancode;
++};
++
++#define MOUSE_MOVE_LEFT  (1 << 1)
++#define MOUSE_MOVE_RIGHT (1 << 2)
++#define MOUSE_MOVE_UP    (1 << 3)
++#define MOUSE_MOVE_DOWN  (1 << 4)
++
++struct kbd_ctx
++{
++	struct work_struct work_struct;
++	uint8_t version_number;
++
++	struct i2c_client *i2c_client;
++	struct input_dev *input_dev;
++
++	// Map from input HID scancodes to Linux keycodes
++	uint8_t *keycode_map;
++
++	// Key state and touch FIFO queue
++	uint8_t key_fifo_count;
++	struct key_fifo_item key_fifo_data[KBD_FIFO_SIZE];
++	uint64_t last_keypress_at;
++        
++        int mouse_mode;
++        uint8_t mouse_move_dir;
++	
++	struct power_supply *pc_battery_psy;
++	uint8_t bat_percent;
++	uint8_t bat_status;
++	uint16_t queued;
++
++	struct backlight_device *bl_dev;
++};
++
++void pc_battery_update(struct kbd_ctx *ctx);
++int picocalc_battery_probe(void);
++
++// Parse 0 to 255 from string
++static inline int parse_u8(char const* buf)
++{
++	int rc, result;
++
++    // Parse string value
++	if ((rc = kstrtoint(buf, 10, &result)) || (result < 0) || (result > 0xff)) {
++		return -EINVAL;
++	}
++	return result;
++}
++
++// Read a single uint8_t value from I2C register
++static inline int kbd_read_i2c_u8(struct i2c_client* i2c_client, uint8_t reg_addr,
++	uint8_t* dst)
++{
++	int reg_value;
++
++	// Read value over I2C
++	if ((reg_value = i2c_smbus_read_byte_data(i2c_client, reg_addr)) < 0) {
++		dev_err(&i2c_client->dev,
++			"%s Could not read from register 0x%02X, error: %d\n",
++			__func__, reg_addr, reg_value);
++		return reg_value;
++	}
++
++	// Assign result to buffer
++	*dst = reg_value & 0xFF;
++
++	return 0;
++}
++
++// Write a single uint8_t value to I2C register
++static inline int kbd_write_i2c_u8(struct i2c_client* i2c_client, uint8_t reg_addr,
++	uint8_t src)
++{
++	int rc;
++
++	// Write value over I2C
++	if ((rc = i2c_smbus_write_byte_data(i2c_client,
++		reg_addr | PICOCALC_WRITE_MASK, src))) {
++
++		dev_err(&i2c_client->dev,
++			"%s Could not write to register 0x%02X, Error: %d\n",
++			__func__, reg_addr, rc);
++		return rc;
++	}
++
++	return 0;
++}
++
++// Read a pair of uint8_t values from I2C register
++static inline int kbd_read_i2c_2u8(struct i2c_client* i2c_client, uint8_t reg_addr,
++	uint8_t* dst)
++{
++	int word_value;
++
++	// Read value over I2C
++	if ((word_value = i2c_smbus_read_word_data(i2c_client, reg_addr)) < 0) {
++		dev_err(&i2c_client->dev,
++			"%s Could not read from register 0x%02X, error: %d\n",
++			__func__, reg_addr, word_value);
++		return word_value;
++	}
++
++	// Assign result to buffer
++	*dst = (uint8_t)(word_value & 0xFF);
++	*(dst + 1) = (uint8_t)((word_value & 0xFF00) >> 8);
++
++	return 0;
++}
++
++// Shared global state for global interfaces such as sysfs
++struct kbd_ctx *g_ctx;
++
++void input_fw_read_fifo(struct kbd_ctx* ctx)
++{
++	uint8_t fifo_idx;
++	int rc;
++
++	// Read number of FIFO items
++    /*
++	if (kbd_read_i2c_u8(ctx->i2c_client, REG_KEY, &ctx->key_fifo_count)) {
++		return;
++	}
++    */
++	ctx->key_fifo_count = 0;
++
++	// Read and transfer all FIFO items
++
++	for (fifo_idx = 0; fifo_idx < KBD_FIFO_SIZE; fifo_idx++) {
++
++        	uint8_t data[2];
++		// Read 2 fifo items
++		if ((rc = kbd_read_i2c_2u8(ctx->i2c_client, 0x09,
++			(uint8_t*)&data))) {
++
++			dev_err(&ctx->i2c_client->dev,
++				"%s Could not read REG_FIF, Error: %d\n", __func__, rc);
++			return;
++		}
++        
++        if (data[0] == 0)
++        {
++            break;
++        }
++
++        ctx->key_fifo_data[fifo_idx]._ = 0;
++        ctx->key_fifo_data[fifo_idx].state = data[0];
++        ctx->key_fifo_data[fifo_idx].scancode= data[1];
++        ctx->key_fifo_count++;
++		// Advance FIFO position
++	dev_info_fe(&ctx->i2c_client->dev,
++			"%s %02d: 0x%02x%02x State %d Scancode %d\n",
++			__func__, fifo_idx,
++			((uint8_t*)&ctx->key_fifo_data[fifo_idx])[0],
++			((uint8_t*)&ctx->key_fifo_data[fifo_idx])[1],
++			ctx->key_fifo_data[fifo_idx].state,
++			ctx->key_fifo_data[fifo_idx].scancode);
++		/*
++	printk("%02d: 0x%02x%02x State %d Scancode %d\n",
++			fifo_idx,
++			((uint8_t*)&ctx->key_fifo_data[fifo_idx])[0],
++			((uint8_t*)&ctx->key_fifo_data[fifo_idx])[1],
++			ctx->key_fifo_data[fifo_idx].state,
++			ctx->key_fifo_data[fifo_idx].scancode);
++		*/
++	}
++}
++
++static void key_report_event(struct kbd_ctx* ctx,
++	struct key_fifo_item const* ev)
++{
++	uint8_t keycode;
++
++	// Only handle key pressed, held, or released events
++	if ((ev->state != KEY_STATE_PRESSED) && (ev->state != KEY_STATE_RELEASED)
++	 && (ev->state != KEY_STATE_HOLD)) {
++		return;
++	}
++
++        /* right shift */
++        if (ev->scancode == 0xA3)
++        {
++            if (ev->state == KEY_STATE_PRESSED)
++            {
++                ctx->mouse_mode = !ctx->mouse_mode;
++            }
++            return;
++        }
++	
++	if(ev->scancode == 0x91){
++	    pr_info("%s get power off pressed",__func__);
++	    
++	    input_report_key(ctx->input_dev, KEY_POWER,1);
++	    input_sync(ctx->input_dev);
++	    input_report_key(ctx->input_dev, KEY_POWER, 0); 
++            input_sync(ctx->input_dev);
++	    return;
++	    
++	}
++
++        if (ctx->mouse_mode)
++        {
++            switch(ev->scancode)
++            {
++            /* KEY_BACKSPACE */
++/*
++            case '\b':
++                  if (ev->state == KEY_STATE_PRESSED)
++                  {
++                      input_report_abs(ctx->input_dev, ABS_X, 0);
++                      input_report_abs(ctx->input_dev, ABS_Y, 0);
++                  } 
++                  return;
++*/
++            /* KEY_RIGHT */
++            case 0xb7:
++                  if (ev->state == KEY_STATE_PRESSED)
++                  {
++                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_RIGHT))
++	                  ctx->last_keypress_at = ktime_get_boottime_ns();
++                      ctx->mouse_move_dir |= MOUSE_MOVE_RIGHT;
++                  }
++                  else if (ev->state == KEY_STATE_RELEASED)
++                  {
++                      ctx->mouse_move_dir &= ~MOUSE_MOVE_RIGHT;
++                  }
++                  return;
++            /* KEY_LEFT */
++            case 0xb4:
++                  if (ev->state == KEY_STATE_PRESSED)
++                  {
++                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_LEFT))
++	                  ctx->last_keypress_at = ktime_get_boottime_ns();
++                      ctx->mouse_move_dir |= MOUSE_MOVE_LEFT;
++                  }
++                  else if (ev->state == KEY_STATE_RELEASED)
++                  {
++	              ctx->last_keypress_at = ktime_get_boottime_ns();
++                      ctx->mouse_move_dir &= ~MOUSE_MOVE_LEFT;
++                  }
++                  return;
++            /* KEY_DOWN */
++            case 0xb6:
++                  if (ev->state == KEY_STATE_PRESSED)
++                  {
++                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_DOWN))
++	                  ctx->last_keypress_at = ktime_get_boottime_ns();
++                      ctx->mouse_move_dir |= MOUSE_MOVE_DOWN;
++                  }
++                  else if (ev->state == KEY_STATE_RELEASED)
++                  {
++                      ctx->mouse_move_dir &= ~MOUSE_MOVE_DOWN;
++                  }
++                  return;
++            /* KEY_UP */
++            case 0xb5:
++                  if (ev->state == KEY_STATE_PRESSED)
++                  {
++                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_UP))
++	                  ctx->last_keypress_at = ktime_get_boottime_ns();
++                      ctx->mouse_move_dir |= MOUSE_MOVE_UP;
++                  }
++                  else if (ev->state == KEY_STATE_RELEASED)
++                  {
++                      ctx->mouse_move_dir &= ~MOUSE_MOVE_UP;
++                  }
++                  return;
++            /* KEY_RIGHTBRACE */
++            case ']':
++	          input_report_key(ctx->input_dev, BTN_LEFT, ev->state == KEY_STATE_PRESSED);
++                  return;
++            /* KEY_LEFTBRACE */
++            case '[':
++	          input_report_key(ctx->input_dev, BTN_RIGHT, ev->state == KEY_STATE_PRESSED);
++                  return;
++            default:
++                     break;
++            }
++        }
++
++	// Post key scan event
++	input_event(ctx->input_dev, EV_MSC, MSC_SCAN, ev->scancode);
++
++	// Map input scancode to Linux input keycode
++
++	keycode = keycodes[ev->scancode];
++
++	//keycode = ev->scancode;
++	dev_info_fe(&ctx->i2c_client->dev,
++		"%s state %d, scancode %d mapped to keycode %d\n",
++		__func__, ev->state, ev->scancode, keycode);
++	//printk("state %d, scancode %d mapped to keycode %d\n",
++	//	ev->state, ev->scancode, keycode);
++
++	// Scancode mapped to ignored keycode
++	if (keycode == 0) {
++		return;
++
++	// Scancode converted to keycode not in map
++	} else if (keycode == KEY_UNKNOWN) {
++		dev_warn(&ctx->i2c_client->dev,
++			"%s Could not get Keycode for Scancode: [0x%02X]\n",
++			__func__, ev->scancode);
++		return;
++	}
++
++	// Update last keypress time
++	g_ctx->last_keypress_at = ktime_get_boottime_ns();
++
++/*
++	if (keycode == KEY_STOP) {
++
++		// Pressing power button sends Tmux prefix (Control + code 171 in keymap)
++		if (ev->state == KEY_STATE_PRESSED) {
++			input_report_key(ctx->input_dev, KEY_LEFTCTRL, TRUE);
++			input_report_key(ctx->input_dev, 171, TRUE);
++			input_report_key(ctx->input_dev, 171, FALSE);
++			input_report_key(ctx->input_dev, KEY_LEFTCTRL, FALSE);
++
++		// Short hold power buttion opens Tmux menu (Control + code 174 in keymap)
++		} else if (ev->state == KEY_STATE_HOLD) {
++			input_report_key(ctx->input_dev, KEY_LEFTCTRL, TRUE);
++			input_report_key(ctx->input_dev, 174, TRUE);
++			input_report_key(ctx->input_dev, 174, FALSE);
++			input_report_key(ctx->input_dev, KEY_LEFTCTRL, FALSE);
++		}
++		return;
++	}
++    */
++
++	// Subsystem key handling
++    /*
++	if (input_fw_consumes_keycode(ctx, &keycode, keycode, ev->state)
++	 || input_touch_consumes_keycode(ctx, &keycode, keycode, ev->state)
++	 || input_modifiers_consumes_keycode(ctx, &keycode, keycode, ev->state)
++	 || input_meta_consumes_keycode(ctx, &keycode, keycode, ev->state)) {
++		return;
++	}
++    */
++
++	// Ignore hold keys at this point
++	if (ev->state == KEY_STATE_HOLD) {
++		return;
++	}
++
++/*
++	// Apply pending sticky modifiers
++	keycode = input_modifiers_apply_pending(ctx, keycode);
++*/
++
++	// Report key to input system
++	input_report_key(ctx->input_dev, keycode, ev->state == KEY_STATE_PRESSED);
++
++	// Reset sticky modifiers
++//	input_modifiers_reset(ctx);
++}
++
++static void input_workqueue_handler(struct work_struct *work_struct_ptr)
++{
++	struct kbd_ctx *ctx;
++	uint8_t fifo_idx;
++
++	// Get keyboard context from work struct
++	ctx = container_of(work_struct_ptr, struct kbd_ctx, work_struct);
++
++	input_fw_read_fifo(ctx);
++	
++	if(ctx->queued == 0) {
++                ctx->queued++;
++                pc_battery_update(ctx);
++        }else {
++                if(ctx->queued > 255) {
++                        ctx->queued = 0;
++                }else{
++                        ctx->queued++;
++                }
++        }
++	
++
++	// Process FIFO items
++	for (fifo_idx = 0; fifo_idx < ctx->key_fifo_count; fifo_idx++) {
++		key_report_event(ctx, &ctx->key_fifo_data[fifo_idx]);
++	}
++
++	if (ctx->mouse_mode)
++        {
++            uint64_t press_time = ktime_get_boottime_ns() - ctx->last_keypress_at;
++            if (press_time <= mouse_fast_move_thr_time)
++            {
++                mouse_move_step = 1;
++            }
++            else if (press_time <= 3 * mouse_fast_move_thr_time)
++            {
++                mouse_move_step = 2;
++            }
++            else
++            {
++                mouse_move_step = 4;
++            }
++
++            if (ctx->mouse_move_dir & MOUSE_MOVE_LEFT)
++            {
++                input_report_rel(ctx->input_dev, REL_X, -mouse_move_step);
++            } 
++            if (ctx->mouse_move_dir & MOUSE_MOVE_RIGHT)
++            {
++                input_report_rel(ctx->input_dev, REL_X, mouse_move_step);
++            } 
++            if (ctx->mouse_move_dir & MOUSE_MOVE_DOWN)
++            {
++                input_report_rel(ctx->input_dev, REL_Y, mouse_move_step);
++            } 
++            if (ctx->mouse_move_dir & MOUSE_MOVE_UP)
++            {
++                input_report_rel(ctx->input_dev, REL_Y, -mouse_move_step);
++            } 
++        }
++
++
++	// Reset pending FIFO count
++	ctx->key_fifo_count = 0;
++
++	// Synchronize input system and clear client interrupt flag
++	input_sync(ctx->input_dev);
++    /*
++	if (kbd_write_i2c_u8(ctx->i2c_client, REG_INT, 0)) {
++		return;
++	}
++    */
++
++}
++static void kbd_timer_function(struct timer_list *data);
++DEFINE_TIMER(g_kbd_timer,kbd_timer_function);
++
++static void kbd_timer_function(struct timer_list *data)
++{
++    data = NULL;
++    schedule_work(&g_ctx->work_struct);
++    mod_timer(&g_kbd_timer, jiffies + HZ / 128);
++}
++
++int input_probe(struct i2c_client* i2c_client)
++{
++	int rc, i;
++
++	// Allocate keyboard context (managed by device lifetime)
++	g_ctx = devm_kzalloc(&i2c_client->dev, sizeof(*g_ctx), GFP_KERNEL);
++	if (!g_ctx) {
++		return -ENOMEM;
++	}
++
++	// Allocate and copy keycode array
++	g_ctx->keycode_map = devm_kmemdup(&i2c_client->dev, keycodes, NUM_KEYCODES,
++		GFP_KERNEL);
++	if (!g_ctx->keycode_map) {
++		return -ENOMEM;
++	}
++
++	// Initialize keyboard context
++	g_ctx->i2c_client = i2c_client;
++	g_ctx->last_keypress_at = ktime_get_boottime_ns();
++
++	// Run subsystem probes
++    /*
++	if ((rc = input_fw_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_fw_probe failed\n");
++		return rc;
++	}
++	if ((rc = input_rtc_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_rtc_probe failed\n");
++		return rc;
++	}
++	if ((rc = input_display_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_display_probe failed\n");
++		return rc;
++	}
++	if ((rc = input_modifiers_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_modifiers_probe failed\n");
++		return rc;
++	}
++	if ((rc = input_touch_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_touch_probe failed\n");
++		return rc;
++	}
++	if ((rc = input_meta_probe(i2c_client, g_ctx))) {
++		dev_err(&i2c_client->dev, "picocalc_kbd: input_meta_probe failed\n");
++		return rc;
++	}
++    */
++
++	// Allocate input device
++	if ((g_ctx->input_dev = devm_input_allocate_device(&i2c_client->dev)) == NULL) {
++		dev_err(&i2c_client->dev,
++			"%s Could not devm_input_allocate_device BBQX0KBD.\n", __func__);
++		return -ENOMEM;
++	}
++
++	// Initialize input device
++	g_ctx->input_dev->name = i2c_client->name;
++	g_ctx->input_dev->id.bustype = KBD_BUS_TYPE;
++	g_ctx->input_dev->id.vendor  = KBD_VENDOR_ID;
++	g_ctx->input_dev->id.product = KBD_PRODUCT_ID;
++	g_ctx->input_dev->id.version = KBD_VERSION_ID;
++
++	// Initialize input device keycodes
++	g_ctx->input_dev->keycode = keycodes; //g_ctx->keycode_map;
++	g_ctx->input_dev->keycodesize = sizeof(keycodes[0]);
++	g_ctx->input_dev->keycodemax = ARRAY_SIZE(keycodes);
++
++	// Set input device keycode bits
++	for (i = 0; i < NUM_KEYCODES; i++) {
++		__set_bit(keycodes[i], g_ctx->input_dev->keybit);
++	}
++	__clear_bit(KEY_RESERVED, g_ctx->input_dev->keybit);
++	__set_bit(EV_REP, g_ctx->input_dev->evbit);
++	__set_bit(EV_KEY, g_ctx->input_dev->evbit);
++
++	// Set input device capabilities
++	input_set_capability(g_ctx->input_dev, EV_MSC, MSC_SCAN);
++	input_set_capability(g_ctx->input_dev, EV_REL, REL_X);
++	input_set_capability(g_ctx->input_dev, EV_REL, REL_Y);
++/*
++	input_set_capability(g_ctx->input_dev, EV_ABS, ABS_X);
++	input_set_capability(g_ctx->input_dev, EV_ABS, ABS_Y);
++        input_set_abs_params(g_ctx->input_dev, ABS_X, 0, 320, 4, 8);
++        input_set_abs_params(g_ctx->input_dev, ABS_Y, 0, 320, 4, 8);
++*/
++	input_set_capability(g_ctx->input_dev, EV_KEY, BTN_LEFT);
++	input_set_capability(g_ctx->input_dev, EV_KEY, BTN_RIGHT);
++
++	// Request IRQ handler for I2C client and initialize workqueue
++    /*
++	if ((rc = devm_request_threaded_irq(&i2c_client->dev,
++		i2c_client->irq, NULL, input_irq_handler, IRQF_SHARED | IRQF_ONESHOT,
++		i2c_client->name, g_ctx))) {
++
++		dev_err(&i2c_client->dev,
++			"Could not claim IRQ %d; error %d\n", i2c_client->irq, rc);
++		return rc;
++	}
++    */
++        g_ctx->mouse_mode = FALSE;
++        g_ctx->mouse_move_dir = 0;
++
++
++	picocalc_battery_probe();
++	g_ctx->bat_percent = 0;
++        g_ctx->bat_status = 0;
++        g_ctx->queued = 0;
++
++	INIT_WORK(&g_ctx->work_struct, input_workqueue_handler);
++    	g_kbd_timer.expires = jiffies + HZ / 128;
++    	add_timer(&g_kbd_timer);
++	
++	// Register input device with input subsystem
++	dev_info(&i2c_client->dev,
++		"%s registering input device", __func__);
++	if ((rc = input_register_device(g_ctx->input_dev))) {
++		dev_err(&i2c_client->dev,
++			"Failed to register input device, error: %d\n", rc);
++		return rc;
++	}
++
++	return 0;
++}
++
++void input_shutdown(struct i2c_client* i2c_client)
++{
++	// Run subsystem shutdowns
++    /*
++	input_meta_shutdown(i2c_client, g_ctx);
++	input_touch_shutdown(i2c_client, g_ctx);
++	input_modifiers_shutdown(i2c_client, g_ctx);
++	input_display_shutdown(i2c_client, g_ctx);
++	input_rtc_shutdown(i2c_client, g_ctx);
++	input_fw_shutdown(i2c_client, g_ctx);
++    */
++
++	// Remove context from global state
++	// (It is freed by the device-specific memory mananger)
++    del_timer(&g_kbd_timer);
++    
++	g_ctx = NULL;
++}
++
++uint32_t params_get_sysfs_gid(void)
++{
++	return sysfs_gid_setting;
++}
++
++// Read battery percent over I2C
++static int read_battery_percent(void)
++{
++	int rc;
++	uint8_t percent[2];
++
++	// Make sure I2C client was initialized
++	if ((g_ctx == NULL) || (g_ctx->i2c_client == NULL)) {
++		return -EINVAL;
++	}
++
++	// Read battery level
++	if ((rc = kbd_read_i2c_2u8(g_ctx->i2c_client, REG_ID_BAT, percent)) < 0) {
++		return rc;
++	}
++		
++	g_ctx->bat_status  = (percent[1] >> 7) & 0x01;
++	percent[1] &= ~(1<<7);
++	g_ctx->bat_percent = percent[1];
++
++	//pr_info("%d picoclac_kbd battery.\n", percent[1]);
++	// Calculate raw battery level
++	return percent[1];
++}
++
++static int parse_and_write_i2c_u8(char const* buf, size_t count, uint8_t reg)
++{
++	int parsed;
++
++	// Parse string entry
++	if ((parsed = parse_u8(buf)) < 0) {
++		return -EINVAL;
++	}
++
++	// Write value to LED register if available
++	if (g_ctx && g_ctx->i2c_client) {
++		kbd_write_i2c_u8(g_ctx->i2c_client, reg, (uint8_t)parsed);
++	}
++
++	return count;
++}
++
++// Sysfs entries
++
++// Battery percent approximate
++static ssize_t battery_percent_show(struct kobject *kobj, struct kobj_attribute *attr,
++	char *buf)
++{
++	int percent;
++
++	if ((percent = read_battery_percent()) < 0) {
++		return percent;
++	}
++
++	// Format into buffer
++	return sprintf(buf, "%d\n", percent);
++}
++struct kobj_attribute battery_percent_attr
++	= __ATTR(battery_percent, 0444, battery_percent_show, NULL);
++
++// Keyboard backlight value
++static ssize_t __used keyboard_backlight_store(struct kobject *kobj,
++	struct kobj_attribute *attr, char const *buf, size_t count)
++{
++	return parse_and_write_i2c_u8(buf, count, REG_ID_BK2);
++}
++struct kobj_attribute keyboard_backlight_attr
++	= __ATTR(keyboard_backlight, 0220, NULL, keyboard_backlight_store);
++
++// screen backlight value
++static ssize_t __used screen_backlight_store(struct kobject *kobj,
++	struct kobj_attribute *attr, char const *buf, size_t count)
++{
++	return parse_and_write_i2c_u8(buf, count, REG_ID_BKL);
++}
++struct kobj_attribute screen_backlight_attr
++	= __ATTR(screen_backlight, 0220, NULL, screen_backlight_store);
++
++// Time since last keypress in milliseconds
++static ssize_t last_keypress_show(struct kobject *kobj, struct kobj_attribute *attr,
++	char *buf)
++{
++	uint64_t last_keypress_ms;
++
++	if (g_ctx) {
++
++		// Get time in ns
++		last_keypress_ms = ktime_get_boottime_ns();
++		if (g_ctx->last_keypress_at < last_keypress_ms) {
++			last_keypress_ms -= g_ctx->last_keypress_at;
++
++			// Calculate time in milliseconds
++			last_keypress_ms = div_u64(last_keypress_ms, 1000000);
++
++			// Format into buffer
++			return sprintf(buf, "%lld\n", last_keypress_ms);
++		}
++	}
++
++	return sprintf(buf, "-1\n");
++}
++struct kobj_attribute last_keypress_attr
++	= __ATTR(last_keypress, 0444, last_keypress_show, NULL);
++
++// Sysfs attributes (entries)
++struct kobject *picocalc_kobj = NULL;
++static struct attribute *picocalc_attrs[] = {
++	&battery_percent_attr.attr,
++	&screen_backlight_attr.attr,
++	&last_keypress_attr.attr,
++	&keyboard_backlight_attr.attr,
++	NULL,
++};
++static struct attribute_group picocalc_attr_group = {
++	.attrs = picocalc_attrs
++};
++
++static void picocalc_get_ownership
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
++(struct kobject *kobj, kuid_t *uid, kgid_t *gid)
++#else
++(struct kobject const *kobj, kuid_t *uid, kgid_t *gid)
++#endif
++{
++	if (gid != NULL) {
++		gid->val = params_get_sysfs_gid();
++	}
++}
++
++static struct kobj_type picocalc_ktype = {
++	.get_ownership = picocalc_get_ownership,
++	.sysfs_ops = &kobj_sysfs_ops
++};
++
++int sysfs_probe(struct i2c_client* i2c_client)
++{
++	int rc;
++
++	// Allocate custom sysfs type
++	if ((picocalc_kobj = devm_kzalloc(&i2c_client->dev, sizeof(*picocalc_kobj), GFP_KERNEL)) == NULL) {
++		return -ENOMEM;
++	}
++
++	// Create sysfs entries for picocalc with custom type
++	rc = kobject_init_and_add(picocalc_kobj, &picocalc_ktype, firmware_kobj, "picocalc");
++	if (rc < 0) {
++		kobject_put(picocalc_kobj);
++		return rc;
++	}
++
++	// Create sysfs attributes
++	if (sysfs_create_group(picocalc_kobj, &picocalc_attr_group)) {
++		kobject_put(picocalc_kobj);
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
++void sysfs_shutdown(struct i2c_client* i2c_client)
++{
++	// Remove sysfs entry
++	if (picocalc_kobj) {
++		kobject_put(picocalc_kobj);
++		picocalc_kobj = NULL;
++	}
++}
++
++static int picocalc_kbd_probe
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
++(struct i2c_client* i2c_client, struct i2c_device_id const* i2c_id)
++#else
++(struct i2c_client* i2c_client)
++#endif
++{
++	int rc;
++
++	// Initialize key handler system
++	if ((rc = input_probe(i2c_client))) {
++		return rc;
++	}
++
++	// Initialize module parameters
++    /*
++	if ((rc = params_probe())) {
++		return rc;
++	}
++    */
++
++	// Initialize sysfs interface
++	if ((rc = sysfs_probe(i2c_client))) {
++		return rc;
++	}
++
++	return 0;
++}
++
++static void picocalc_kbd_shutdown(struct i2c_client* i2c_client)
++{
++	sysfs_shutdown(i2c_client);
++//	params_shutdown();
++	input_shutdown(i2c_client);
++}
++
++static void picocalc_kbd_remove(struct i2c_client* i2c_client)
++{
++	dev_info_fe(&i2c_client->dev,
++		"%s Removing picocalc-kbd.\n", __func__);
++
++	picocalc_kbd_shutdown(i2c_client);
++}
++
++// Driver definitions
++
++// Device IDs
++static const struct i2c_device_id picocalc_kbd_i2c_device_id[] = {
++	{ "picocalc_kbd", 0, },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, picocalc_kbd_i2c_device_id);
++static const struct of_device_id picocalc_kbd_of_device_id[] = {
++	{ .compatible = "picocalc_kbd", },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, picocalc_kbd_of_device_id);
++
++// Callbacks
++static struct i2c_driver picocalc_kbd_driver = {
++	.driver = {
++		.name = "picocalc_kbd",
++		.of_match_table = picocalc_kbd_of_device_id,
++	},
++	.probe    = picocalc_kbd_probe,
++	.shutdown = picocalc_kbd_shutdown,
++	.remove   = picocalc_kbd_remove,
++	.id_table = picocalc_kbd_i2c_device_id,
++};
++
++////---------------------------------------------Battery 
++#define BATTERY_FULL_DESIGN 4000000 // μWh
++
++static enum power_supply_property pc_battery_props[] = {
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_TYPE,
++	POWER_SUPPLY_PROP_ENERGY_NOW,
++	POWER_SUPPLY_PROP_ENERGY_FULL,
++	POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN,
++};
++
++void pc_battery_update(struct kbd_ctx *ctx) {
++	read_battery_percent();
++	power_supply_changed(ctx->pc_battery_psy);
++}
++
++static int pc_battery_get_property(struct power_supply *psy,
++                                   enum power_supply_property psp,
++                                   union power_supply_propval *val)
++{
++
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = 1;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		val->intval = g_ctx->bat_percent;
++		break;
++	case POWER_SUPPLY_PROP_STATUS:
++		if(g_ctx->bat_status) {
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		}else{
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		}
++		break;
++	case POWER_SUPPLY_PROP_TYPE:
++		val->intval = POWER_SUPPLY_TYPE_BATTERY;
++		break;
++	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
++	case POWER_SUPPLY_PROP_ENERGY_FULL:
++		val->intval = BATTERY_FULL_DESIGN;
++		break;
++	case POWER_SUPPLY_PROP_ENERGY_NOW:
++		val->intval = (g_ctx->bat_percent * BATTERY_FULL_DESIGN) / 100;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++
++
++
++}
++
++static const struct power_supply_desc my_battery_desc = {
++    .name = "BAT0",
++    .type = POWER_SUPPLY_TYPE_BATTERY,
++    .properties = pc_battery_props,
++    .num_properties = ARRAY_SIZE(pc_battery_props),
++    .get_property = pc_battery_get_property,
++};
++
++
++int picocalc_battery_probe(void)
++{
++    struct power_supply_config psy_cfg = {};
++    g_ctx->pc_battery_psy = power_supply_register(NULL, &my_battery_desc, &psy_cfg);
++    return PTR_ERR_OR_ZERO(g_ctx->pc_battery_psy);
++}
++
++
++static int shutdown_notify(struct notifier_block *nb, unsigned long action, void *data)
++{
++	
++	int rc;
++	if (action == SYS_POWER_OFF || action == SYS_HALT ) {
++		pr_info("picocalc_kbd: sending shutdown command to keyboard\n");
++
++		if ((rc = kbd_write_i2c_u8(g_ctx->i2c_client, REG_ID_OFF,0x07)) < 0) {
++			pr_err("Failed to send shutdown cmd to picocalc kbd: %d\n", rc);
++                	return rc;
++        	}
++	}
++	
++	if (action == SYS_RESTART){
++		pr_info("picocalc_kbd: sending reset command to keyboard\n");
++		if ((rc = kbd_write_i2c_u8(g_ctx->i2c_client, REG_ID_RST,0x01)) < 0) {
++                        pr_err("Failed to send reset cmd to picocalc kbd: %d\n", rc);
++                        return rc;
++                }
++	}
++	return NOTIFY_DONE;
++}
++
++
++static struct notifier_block shutdown_notifier = {
++        .notifier_call = shutdown_notify,
++        .priority = 0,
++};
++
++////////////////////////////////////////////////////////////////////////Screen backlight
++
++
++static int pcbl_update_status(struct backlight_device *bl)
++{
++	struct backlight_properties *props = &bl->props;
++	int brightness = props->brightness;
++	u8 val = brightness;  // 0~255 brightness
++	int ret;
++
++	if (backlight_is_blank(bl))
++		val = 0;
++
++	if ((ret = kbd_write_i2c_u8(g_ctx->i2c_client, REG_ID_BKL,val)) < 0) {
++        	pr_err("Failed to update picocalc lcd backlight: %d\n", ret);
++        }
++
++	return ret;
++}
++
++static int pcbl_get_brightness(struct backlight_device *bl)
++{
++	uint8_t data[2];
++	int rc;
++
++	if ((rc = kbd_read_i2c_2u8(g_ctx->i2c_client, REG_ID_BKL,
++                        (uint8_t*)&data))) {
++            dev_err(&g_ctx->i2c_client->dev,
++                   "%s Could not read REG_ID_BKL, Error: %d\n", __func__, rc);
++
++	}
++
++	return data[1];
++}
++
++static const struct backlight_ops pcbl_ops = {
++	.update_status = pcbl_update_status,
++	.get_brightness = pcbl_get_brightness, 
++};
++
++static int pcbl_probe(void)
++{
++	struct backlight_properties props;
++	struct backlight_device *bl;
++	struct i2c_client *client;
++
++	client = g_ctx->i2c_client;
++
++	memset(&props, 0, sizeof(props));
++	props.type = BACKLIGHT_RAW;
++	props.max_brightness = 255;
++
++	bl = devm_backlight_device_register(&client->dev, "picocalc_lcd_backlight", &client->dev, g_ctx, &pcbl_ops, &props);
++	if (IS_ERR(bl))
++		return PTR_ERR(bl);
++
++	bl->props.brightness = 128;
++	bl->props.power = FB_BLANK_UNBLANK;
++
++	backlight_update_status(bl);
++
++	return 0;
++}
++
++
++
++// Module constructor
++static int __init picocalc_kbd_init(void)
++{
++	int rc;
++
++	// Adding the I2C driver will call the _probe function to continue setup
++	if ((rc = i2c_add_driver(&picocalc_kbd_driver))) {
++		pr_err("%s Could not initialise picocalc-kbd! Error: %d\n",
++			__func__, rc);
++		return rc;
++	}
++	pr_info("%s Initalised picoclac_kbd.\n", __func__);
++		
++	register_reboot_notifier(&shutdown_notifier);
++
++	pr_info("%s Initalised picoclac_kbd shutdown_notifier.\n", __func__);
++
++	pcbl_probe();
++
++	pr_info("%s Initalised picoclac_kbd lcd backlight.\n", __func__);
++
++	return rc;
++}
++module_init(picocalc_kbd_init);
++
++// Module destructor
++static void __exit picocalc_kbd_exit(void)
++{
++	pr_info("%s Exiting picocalc_kbd.\n", __func__);
++	i2c_del_driver(&picocalc_kbd_driver);
++	
++	power_supply_unregister(g_ctx->pc_battery_psy);
++	unregister_reboot_notifier(&shutdown_notifier);
++	
++}
++module_exit(picocalc_kbd_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("hiro <hiro@hiro.com>");
++MODULE_DESCRIPTION("keyboard driver for picocalc");
++MODULE_VERSION("0.01");
+diff --git a/drivers/input/keyboard/picocalc_kbd_code.h b/drivers/input/keyboard/picocalc_kbd_code.h
+new file mode 100644
+index 000000000..25569b524
+--- /dev/null
++++ b/drivers/input/keyboard/picocalc_kbd_code.h
+@@ -0,0 +1,208 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Keyboard Driver for Blackberry Keyboards BBQ10 from arturo182. Software written by wallComputer.
++ * bbq10kbd_codes.h: Keyboard Layout and Scancodes-Keycodes mapping.
++ */
++
++#ifndef BBQ10KBD_PMOD_CODES_H_
++#define BBQ10KBD_PMOD_CODES_H_
++
++/*
++ *					BBQ10KBD PMOD KEYBOARD LAYOUT
++ *
++ *	+------+-----+----+----+----+----+----+-----+-----+-------+
++ *	|#     |1    |2   |3   |(   |   )|_   |    -|    +|      @|
++ *	|  Q   |  W  | E  | R  | T  |  Y |  U |  I  |  O  |   P   |
++ *	|    S+|   S-|PgUp|PgDn|   \|UP  |^   |=    |{    |}      |
++ *	+------+-----+----+----+----+----+----+-----+-----+-------+
++ *	|*     |4    |5   |6   |/   |   :|;   |    '|    "|    ESC|
++ *	|  A   |  S  | D  | F  | G  |  H |  J |  K  |  L  |  BKSP |
++ *	|     ?|   Sx|   [|   ]|LEFT|HOME|RGHT|V+   |V-   |DLT    |
++ *	+------+-----+----+----+----+----+----+-----+-----+-------+
++ *	|      |7    |8   |9   |?   |   !|,   |    .|    `|       |
++ *	|LFTALT|  Z  | X  | C  | V  |  B |  N |  M  |  $  | ENTER |
++ *	|      |   K+|  K-|   °|   <|DOWN|>   |MENU |Vx   |       |
++ *	+------+-----+----+----+----+----+----+-----+-----+-------+
++ *	|            |0   |TAO                |     |             |
++ *	| LEFT_SHIFT | ~  |       SPACE       |RTALT| RIGHT_SHIFT |
++ *	|            |  Kx|                  &|     |             |
++ *	+------------+----+-------------------+-----+-------------+
++ *
++ * Notes:
++ * Most Important to know:
++ * To present a character as mentioned above a key in the above layout, use LFTALT + Key.
++ * To present a character as mentioned below a key in the above layout, use RTALT + Key.
++ *
++ * Changes from arturo182's layout, if you are used to that, it's good to know these changes.
++ * 1. Sym Key (Scancode 0x1D) on Keyboard is mapped to RTALT.
++ * 2. Note "|" above Enter Key as per original keyboard layout is removed and added under "A"
++ * 3. The external buttons on the Keyboard Featherwing have been changed as below:
++ *__3.1 Leftmost Button changed from Menu Key to Left Ctrl Key.
++ *__3.2 Innet Left Button changed from Left Ctrl Key to Page Up Key.
++ *__3.3 Inner Right Button changed from Back Key to Page Down Key.
++ *__3.4 Outer Right Button changed from Left Shift Key to Menu Key.
++ *__3.5 Center Key of 5-way Button changed from Enter Key to Home Key.
++ */
++
++
++#define NUM_KEYCODES	256
++
++static unsigned short keycodes[NUM_KEYCODES] = {
++	
++
++	[0xA1] = KEY_LEFTALT,
++	[0xA2] = KEY_LEFTSHIFT,
++	[0xA3] = KEY_RIGHTSHIFT,
++	[0xA5] = KEY_LEFTCTRL,
++
++	['a'] = KEY_A,
++	['b'] = KEY_B,
++	['c'] = KEY_C,
++	['d'] = KEY_D,
++	['e'] = KEY_E,
++	['f'] = KEY_F,
++	['g'] = KEY_G,
++	['h'] = KEY_H,
++	['i'] = KEY_I,
++	['j'] = KEY_J,
++	['k'] = KEY_K,
++	['l'] = KEY_L,
++	['m'] = KEY_M,
++	['n'] = KEY_N,
++	['o'] = KEY_O,
++	['p'] = KEY_P,
++	['q'] = KEY_Q,
++	['r'] = KEY_R,
++	['s'] = KEY_S,
++	['t'] = KEY_T,
++	['u'] = KEY_U,
++	['v'] = KEY_V,
++	['w'] = KEY_W,
++	['x'] = KEY_X,
++	['y'] = KEY_Y,
++	['z'] = KEY_Z,
++
++	['A'] = KEY_A,
++	['B'] = KEY_B,
++	['C'] = KEY_C,
++	['D'] = KEY_D,
++	['E'] = KEY_E,
++	['F'] = KEY_F,
++	['G'] = KEY_G,
++	['H'] = KEY_H,
++	['I'] = KEY_I,
++	['J'] = KEY_J,
++	['K'] = KEY_K,
++	['L'] = KEY_L,
++	['M'] = KEY_M,
++	['N'] = KEY_N,
++	['O'] = KEY_O,
++	['P'] = KEY_P,
++	['Q'] = KEY_Q,
++	['R'] = KEY_R,
++	['S'] = KEY_S,
++	['T'] = KEY_T,
++	['U'] = KEY_U,
++	['V'] = KEY_V,
++	['W'] = KEY_W,
++	['X'] = KEY_X,
++	['Y'] = KEY_Y,
++	['Z'] = KEY_Z,
++
++	[' '] = KEY_SPACE,
++	['~'] = KEY_0,
++	['$'] = KEY_4,
++
++	['\b'] = KEY_BACKSPACE,
++	['\n'] = KEY_ENTER,
++	/*
++	 * As per the kernel, a keyboard needs to indicate, in advance, which key values it can report.
++	 * In order to that, it should have unique scancodes pointing those scancode-keycode pairs.
++	 * With the configuration set for now, the keyboard never outputs lower case letters, numbers, and equal to sign.
++	 * We can use these as bogus scancodes, and map the keys we want the keyboard to say its pressed when modifier keys are used.
++	 * This can change however, in case future software versions of the keyboard micrcontroller itself changes to output other stuff.
++	 */
++	['0'] = KEY_0,
++	['1'] = KEY_1,
++	['2'] = KEY_2,
++	['3'] = KEY_3,
++	['4'] = KEY_4,
++	['5'] = KEY_5,
++	['6'] = KEY_6,
++	['7'] = KEY_7,
++	['8'] = KEY_8,
++	['9'] = KEY_9,
++
++	[0x81] = KEY_F1,
++	[0x82] = KEY_F2,
++	[0x83] = KEY_F3,
++	[0x84] = KEY_F4,
++	[0x85] = KEY_F5,
++	[0x86] = KEY_F6,
++	[0x87] = KEY_F7,
++	[0x88] = KEY_F8,
++	[0x89] = KEY_F9,
++	[0x90] = KEY_F10,
++
++	['#'] = KEY_3,
++	['@'] = KEY_2,
++	[0x08] = KEY_BACKSPACE,
++	[0xD4] = KEY_DELETE,
++	[0xD5] = KEY_END,
++	[0xC1] = KEY_CAPSLOCK,
++	[0x09] = KEY_TAB,
++	[0xD2] = KEY_HOME,
++	[0xB1] = KEY_ESC,
++	[0xd0] = KEY_BREAK,
++	[0xd0] = KEY_PAUSE,
++	['='] = KEY_EQUAL,
++	['+'] = KEY_EQUAL,
++	['-'] = KEY_MINUS,
++	['_'] = KEY_MINUS,
++	['\\'] = KEY_BACKSLASH,
++	['|'] = KEY_BACKSLASH,
++	['!'] = KEY_1,
++	[0xD1] = KEY_INSERT,
++	['*'] = KEY_8,
++	['&'] = KEY_7,
++	['^'] = KEY_6,
++	['%'] = KEY_5,
++
++	['.'] = KEY_DOT,
++	['>'] = KEY_DOT,
++
++	[';'] = KEY_SEMICOLON,
++	[':'] = KEY_SEMICOLON,
++
++	[','] = KEY_COMMA,
++	['<'] = KEY_COMMA,
++
++	['`'] = KEY_GRAVE,
++	['~'] = KEY_GRAVE,
++
++	['"'] = KEY_APOSTROPHE,
++	['\''] = KEY_APOSTROPHE,
++
++	['?'] = KEY_SLASH,
++	['/'] = KEY_SLASH,
++
++	[')'] = KEY_0,
++	['('] = KEY_9,
++
++	[']'] = KEY_RIGHTBRACE,
++	['}'] = KEY_RIGHTBRACE,
++
++	['['] = KEY_LEFTBRACE,
++	['{'] = KEY_LEFTBRACE,
++
++	[0xb7] = KEY_RIGHT,
++	[0xb5] = KEY_UP,
++	[0xb6] = KEY_DOWN,
++	[0xb4] = KEY_LEFT,
++	[0xd6] = KEY_PAGEUP,
++	[0xd7] = KEY_PAGEDOWN,
++	[0x91] = KEY_POWER,
++};
++
++
++#endif
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index 764611873..a0d2974ff 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -2165,10 +2165,18 @@ int _mmc_detect_card_removed(struct mmc_host *host)
+ 	int ret;
+ 
+ 	if (!host->card || mmc_card_removed(host->card))
++	{
++		pr_info("%s card already removed",__func__);
+ 		return 1;
+-
++	}
+ 	ret = host->bus_ops->alive(host);
+ 
++	if (mmc_host_is_spi(host)){
++		if( host->ops->get_cd ) {
++			ret = !host->ops->get_cd(host);
++		}
++	}
++
+ 	/*
+ 	 * Card detect status and alive check may be out of sync if card is
+ 	 * removed slowly, when card detect switch changes while card/slot
+@@ -2284,8 +2292,13 @@ void mmc_rescan(struct work_struct *work)
+ 	}
+ 
+ 	/* Verify a registered card to be functional, else remove it. */
+-	if (host->bus_ops)
+-		host->bus_ops->detect(host);
++	if (host->bus_ops){
++		if (mmc_host_is_spi(host)){
++			mmc_detect_mmc(host);
++		}else{
++                       host->bus_ops->detect(host);
++		}
++	}
+ 
+ 	host->detect_change = 0;
+ 
+diff --git a/drivers/mmc/core/core.h b/drivers/mmc/core/core.h
+index a028b48be..1bdcecf80 100644
+--- a/drivers/mmc/core/core.h
++++ b/drivers/mmc/core/core.h
+@@ -83,6 +83,7 @@ void _mmc_detect_change(struct mmc_host *host, unsigned long delay,
+ int _mmc_detect_card_removed(struct mmc_host *host);
+ int mmc_detect_card_removed(struct mmc_host *host);
+ 
++int mmc_detect_mmc(struct mmc_host *host);
+ int mmc_attach_mmc(struct mmc_host *host);
+ int mmc_attach_sd(struct mmc_host *host);
+ int mmc_attach_sdio(struct mmc_host *host);
+diff --git a/drivers/mmc/core/mmc.c b/drivers/mmc/core/mmc.c
+index ff04b6295..05e76995b 100644
+--- a/drivers/mmc/core/mmc.c
++++ b/drivers/mmc/core/mmc.c
+@@ -2396,6 +2396,11 @@ static const struct mmc_bus_ops mmc_ops = {
+ 	.handle_undervoltage = _mmc_handle_undervoltage,
+ };
+ 
++int mmc_detect_mmc(struct mmc_host *host){
++	mmc_detect(host);
++	return 0;
++}
++
+ /*
+  * Starting point for MMC card init.
+  */

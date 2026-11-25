@@ -1,11 +1,12 @@
 # PicoCalc Zero
 
-## Kernel
-Git url: `https://github.com/raspberrypi/linux.git`  
+## 32bit PicoCalc_zero2w_v1.0.img.bz2 
+Kernel git url: `https://github.com/raspberrypi/linux.git`  
 Branch: `rpi-6.1.y`  
-Patch commit hash:`0afb5e98488aed7017b9bf321b575d0177feb7ed`    
+Kernel commit hash:`0afb5e98488aed7017b9bf321b575d0177feb7ed`    
+Pi-gen: https://github.com/cuu/pi-gen/commit/1d60f6d528402bda43a75a375b243d9ebee3d8fa
 
-## How to compile
+### How to compile
 ```
 git clone  https://github.com/raspberrypi/linux
 
@@ -28,7 +29,7 @@ make ARCH=arm KERNEL=kernel7 CROSS_COMPILE=arm-linux-gnueabihf- -j2 zImage modul
 ```
 
 
-## /boot/config.txt
+### /boot/config.txt
 ```
 dtparam=i2c_arm=on
 dtparam=i2c_arm_baudrate=10000
@@ -62,5 +63,31 @@ dtoverlay=audremap,pins_13_12
 enable_uart=1
 ```
 
+
+## 64bit os image
+Kernel git url: `https://github.com/raspberrypi/linux.git`
+Branch: `rpi-6.18.y`
+
+
+### How to compile
+```
+git clone --depth=1 --branch rpi-6.18.y https://github.com/raspberrypi/linux
+
+cd linux
+
+git reset --hard b3495ea401d709af0701a85babcba5e3d788a602
+
+git apply 1.patch
+
+KERNEL=kernel8
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
+
+
+./scripts/config -m CONFIG_KEYBOARD_PICOCALC
+./scripts/config -m TINYDRM_PICOCALC_ILI9488
+make ARCH=arm64 KERNEL=kernel8 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+make ARCH=arm64 KERNEL=kernel8 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs
+```
 
 
